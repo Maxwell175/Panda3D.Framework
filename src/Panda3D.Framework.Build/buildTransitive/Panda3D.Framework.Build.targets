@@ -1,0 +1,415 @@
+<Project>
+
+  <!-- ================================================================================
+       Panda3D.Framework resource pipeline — late (targets) half.
+
+       Imported at the BOTTOM of the consuming build, after the SDK has set $(OutDir) /
+       $(IntermediateOutputPath) and after Panda3D.Tools has set $(Panda3D*). Owns the
+       property defaults, the resolver task, and the process -> pack -> deploy stages.
+       Runs AfterTargets="Build" (so `dotnet build`/`run`/`publish` all trigger it).
+
+       Levels, unified by the Bundle metadata on every asset item:
+         L1 blind copy   — PandaContent with no Bundle -> loose copy to $(PandaContentRoot)
+         L2 multifile    — any asset with Bundle="x.mf" -> staged, then `multify` into x.mf
+         L3 build         — PandaResource/PandaEgg run through a PandaProcessor first
+       ================================================================================ -->
+
+  <!-- ===== Path defaults are set at EXECUTION time (not in a top-level PropertyGroup):
+             $(OutDir)/$(IntermediateOutputPath) are guaranteed populated by then, no
+             matter where this file lands in the import order. Both the pipeline and Clean
+             depend on this. Forward slashes: a backslash is literal on Linux, and the
+             resolver normalizes through Path.GetFullPath so Windows stays happy. ===== -->
+  <Target Name="_PandaInit" Condition="'$(PandaResourcePipeline)' == 'true'">
+    <PropertyGroup>
+      <!-- The fixed output path: bundles + loose files land directly next to the assembly
+           ($(OutDir)), no imposed subfolder. A game that wants a subdirectory puts it in
+           the bundle's own layout (BundlePath) or overrides this property. -->
+      <PandaContentRoot Condition="'$(PandaContentRoot)' == ''">$(OutDir)</PandaContentRoot>
+      <!-- Intermediate build cache for processor outputs (obj), and the per-bundle staging root. -->
+      <PandaBuildDir Condition="'$(PandaBuildDir)' == ''">$(IntermediateOutputPath)panda/build/</PandaBuildDir>
+      <PandaStageDir Condition="'$(PandaStageDir)' == ''">$(IntermediateOutputPath)panda/stage/</PandaStageDir>
+      <!-- Default multify compression; 0 = store uncompressed. Overridable per PandaBundle. -->
+      <PandaDefaultCompression Condition="'$(PandaDefaultCompression)' == ''">6</PandaDefaultCompression>
+
+      <!-- Texture-dependency tracking (default on): a referenced texture changing rebuilds the
+           bam. PandaModelRoot is a ';'-separated search path the texture refs are relative to
+           (passed to the analyzer as its model-root search dirs). The analyzer is the host-RID
+           panda-model-deps from the Panda3D.ModelDeps package — $(PandaModelDeps), which that
+           package's targets set and chmod. Absent (unshipped host RID) = tracking silently off. -->
+      <PandaTrackTextures Condition="'$(PandaTrackTextures)' == ''">true</PandaTrackTextures>
+      <PandaAnalyzerExe Condition="'$(PandaAnalyzerExe)' == ''">$(PandaModelDeps)</PandaAnalyzerExe>
+    </PropertyGroup>
+  </Target>
+
+  <!-- ===== Resolver: joins resources to processors, computes outputs/dests, resolves
+             built-in tool paths, and does the per-file up-to-date check. Inline Roslyn
+             task — the package ships no compiled assembly. ===== -->
+  <UsingTask TaskName="PandaResolveResources" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Resources ParameterType="Microsoft.Build.Framework.ITaskItem[]" />
+      <Content ParameterType="Microsoft.Build.Framework.ITaskItem[]" />
+      <Processors ParameterType="Microsoft.Build.Framework.ITaskItem[]" />
+      <BundleDecls ParameterType="Microsoft.Build.Framework.ITaskItem[]" />
+      <ToolsDir ParameterType="System.String" />
+      <ToolExtension ParameterType="System.String" />
+      <BuildDir ParameterType="System.String" Required="true" />
+      <StageDir ParameterType="System.String" Required="true" />
+      <ContentRoot ParameterType="System.String" Required="true" />
+      <DefaultCompression ParameterType="System.String" />
+      <!-- Texture-dependency tracking: the panda-model-deps analyzer exe, the model-root
+           search dirs (';'-sep), and the global on/off default. Empty AnalyzerExe = off. -->
+      <AnalyzerExe ParameterType="System.String" />
+      <ModelRoots ParameterType="System.String" />
+      <TrackTextures ParameterType="System.String" />
+      <BuildCommands ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+      <Staged ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+      <Bundles ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+      <!-- The final on-disk outputs (loose files + bundle .mf's) with %(Rel), the path
+           relative to the content root, i.e. the publish RelativePath. -->
+      <Published ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.Diagnostics" />
+      <Using Namespace="Microsoft.Build.Framework" />
+      <Using Namespace="Microsoft.Build.Utilities" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var procs = Processors ?? new ITaskItem[0];
+        var decls = BundleDecls ?? new ITaskItem[0];
+        string defComp = string.IsNullOrEmpty(DefaultCompression) ? "6" : DefaultCompression;
+
+        var buildCmds = new List<ITaskItem>();
+        var staged = new List<ITaskItem>();
+        var published = new List<ITaskItem>();  // final on-disk outputs (loose + .mf) for publish
+        var stagedDests = new HashSet<string>(StringComparer.OrdinalIgnoreCase);            // dedupe shared textures
+        var seenBundles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // bundle -> compression
+
+        // Longest extension in processor p that `name` ends with (case-insensitive), or null.
+        string MatchExt(ITaskItem p, string name)
+        {
+            string best = null;
+            foreach (var raw in (p.GetMetadata("Extensions") ?? "").Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var e = raw.Trim();
+                if (e.Length == 0) continue;
+                if (!e.StartsWith(".")) e = "." + e;
+                if (name.EndsWith(e, StringComparison.OrdinalIgnoreCase) && (best == null || e.Length > best.Length)) best = e;
+            }
+            return best;
+        }
+
+        // -pp <dir> flags from the model roots, so egg2bam resolves textures from the same
+        // search dirs the analyzer does.
+        string ppFlags = string.Join(" ", (ModelRoots ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(r => "-pp \"" + r.Trim() + "\""));
+
+        string Subst(string t, string input, string output, string filename, string indir, string outdir, string options)
+        {
+            return t.Replace("{input}", input).Replace("{output}", output).Replace("{filename}", filename)
+                    .Replace("{inputdir}", indir).Replace("{outputdir}", outdir).Replace("{options}", options ?? "")
+                    .Replace("{modelroots}", ppFlags);
+        }
+
+        // Record an asset's staged/loose destination and note its bundle.
+        void AddStaged(string source, string relDir, string outName, ITaskItem meta)
+        {
+            string bundle = meta.GetMetadata("Bundle") ?? "";
+            string bundlePath = meta.GetMetadata("BundlePath") ?? "";
+            string rel = Path.Combine(bundlePath, relDir ?? "", outName);
+            string dest = bundle.Length > 0
+                ? Path.GetFullPath(Path.Combine(StageDir, bundle, rel))
+                : Path.GetFullPath(Path.Combine(ContentRoot, rel));
+
+            // Several models can reference the same texture, landing on one destination. Stage it once.
+            if (!stagedDests.Add(dest)) return;
+
+            if (bundle.Length > 0)
+            {
+                if (!seenBundles.ContainsKey(bundle))
+                {
+                    var d = decls.FirstOrDefault(x => string.Equals(x.ItemSpec, bundle, StringComparison.OrdinalIgnoreCase));
+                    string comp = (d != null && !string.IsNullOrEmpty(d.GetMetadata("Compression"))) ? d.GetMetadata("Compression") : defComp;
+                    seenBundles[bundle] = comp;
+                }
+            }
+            else
+            {
+                // A loose file is a final output; publish it at its content-root-relative path.
+                var pub = new TaskItem(dest);
+                pub.SetMetadata("Rel", rel);
+                published.Add(pub);
+            }
+            var s = new TaskItem(source);
+            s.SetMetadata("Dest", dest);
+            s.SetMetadata("Bundle", bundle);
+            s.SetMetadata("Rel", rel);
+            staged.Add(s);
+        }
+
+        // --- Texture-dependency tracking (default on; opt out per item via TrackTextures=false) ---
+        bool IsModel(string p) => p.EndsWith(".egg", StringComparison.OrdinalIgnoreCase)
+            || p.EndsWith(".egg.pz", StringComparison.OrdinalIgnoreCase)
+            || p.EndsWith(".bam", StringComparison.OrdinalIgnoreCase);
+        bool analyzerOk = !string.Equals(TrackTextures, "false", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrEmpty(AnalyzerExe) && File.Exists(AnalyzerExe);
+        bool Tracked(ITaskItem r) => analyzerOk
+            && !string.Equals(r.GetMetadata("TrackTextures"), "false", StringComparison.OrdinalIgnoreCase)
+            && IsModel(r.GetMetadata("FullPath"));
+
+        // model FullPath -> list of {texturePath, EXISTS|MISSING}
+        Dictionary<string, List<string[]>> RunAnalyzer(List<string> models)
+        {
+            var map = new Dictionary<string, List<string[]>>(StringComparer.Ordinal);
+            try
+            {
+                // RoslynCodeTaskFactory compiles against netstandard refs (no ArgumentList) —
+                // build a quoted argument string by hand.
+                string Quote(string s) => "\"" + (s ?? "").Replace("\"", "\\\"") + "\"";
+                var argv = new List<string>();
+                foreach (var root in (ModelRoots ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                { argv.Add("--model-root"); argv.Add(Quote(root.Trim())); }
+                foreach (var m in models) argv.Add(Quote(m));
+                var psi = new ProcessStartInfo { FileName = AnalyzerExe, Arguments = string.Join(" ", argv), RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+                using var proc = Process.Start(psi);
+                string outText = proc.StandardOutput.ReadToEnd();
+                proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+                foreach (var raw in outText.Split('\n'))
+                {
+                    var line = raw.TrimEnd('\r');
+                    if (line.Length == 0) continue;
+                    var cols = line.Split('\t');
+                    if (cols.Length < 3) continue;
+                    if (!map.TryGetValue(cols[0], out var list)) { list = new List<string[]>(); map[cols[0]] = list; }
+                    list.Add(new[] { cols[1], cols[2] });
+                }
+            }
+            catch (Exception ex) { Log.LogWarning("Panda texture-dependency analysis failed: {0}", ex.Message); }
+            return map;
+        }
+
+        var texDeps = new Dictionary<string, List<string[]>>(StringComparer.Ordinal);
+        if (analyzerOk)
+        {
+            var models = (Resources ?? new ITaskItem[0]).Where(Tracked)
+                .Select(r => r.GetMetadata("FullPath")).Distinct().ToList();
+            if (models.Count > 0) texDeps = RunAnalyzer(models);
+        }
+
+        foreach (var r in Resources ?? new ITaskItem[0])
+        {
+            string src = r.GetMetadata("FullPath");
+            string relDir = r.GetMetadata("RecursiveDir") ?? "";
+            string name = Path.GetFileName(src);
+            string options = r.GetMetadata("Options") ?? "";
+
+            ITaskItem proc = null; string mExt = null;
+            string explicitName = r.GetMetadata("Processor") ?? "";
+            if (explicitName.Length > 0)
+            {
+                proc = procs.LastOrDefault(p => string.Equals(p.ItemSpec, explicitName, StringComparison.OrdinalIgnoreCase));
+                if (proc == null) { Log.LogError("PandaResource '{0}': no PandaProcessor named '{1}'.", src, explicitName); continue; }
+                mExt = MatchExt(proc, name);
+            }
+            else
+            {
+                foreach (var p in procs)
+                {
+                    var e = MatchExt(p, name);
+                    if (e != null && (mExt == null || e.Length > mExt.Length)) { proc = p; mExt = e; }
+                }
+                if (proc == null) { Log.LogError("PandaResource '{0}': no PandaProcessor handles '{1}'. Add a PandaProcessor with a matching Extensions, or set Processor= explicitly.", src, name); continue; }
+            }
+
+            string baseName = (mExt != null && name.EndsWith(mExt, StringComparison.OrdinalIgnoreCase))
+                ? name.Substring(0, name.Length - mExt.Length) : Path.GetFileNameWithoutExtension(name);
+            string outExt = proc.GetMetadata("OutputExtension") ?? "";
+            string outPattern = proc.GetMetadata("OutputPattern") ?? "";
+            string outName = outPattern.Length > 0 ? outPattern.Replace("{filename}", baseName)
+                : baseName + (outExt.Length > 0 ? outExt : Path.GetExtension(name));
+
+            string outPath = Path.GetFullPath(Path.Combine(BuildDir, relDir, outName));
+
+            string tool = proc.GetMetadata("Tool") ?? "";
+            bool builtIn = string.Equals(proc.GetMetadata("BuiltIn"), "true", StringComparison.OrdinalIgnoreCase);
+            if (builtIn && tool.Length > 0) tool = Path.Combine(ToolsDir ?? "", tool + (ToolExtension ?? ""));
+            string cmd = proc.GetMetadata("Command") ?? "";
+            string args = proc.GetMetadata("Args") ?? "";
+            string template = cmd.Length > 0 ? cmd : ("\"" + tool + "\" " + args);
+            // If a custom template ignores {options} but the item supplied some, append them.
+            if (options.Length > 0 && template.IndexOf("{options}", StringComparison.Ordinal) < 0) template += " " + options;
+            string effective = Subst(template, src, outPath, baseName,
+                Path.GetDirectoryName(src) ?? "", Path.GetDirectoryName(outPath) ?? "", options);
+
+            bool needs = !File.Exists(outPath) || File.GetLastWriteTimeUtc(src) > File.GetLastWriteTimeUtc(outPath);
+            // Dependency-aware: a newer referenced texture also forces a rebuild.
+            if (texDeps.TryGetValue(src, out var deps))
+            {
+                foreach (var d in deps)
+                {
+                    if (!string.Equals(d[1], "EXISTS", StringComparison.Ordinal))
+                    { Log.LogWarning("Panda: '{0}' references a texture not found on disk: {1}", src, d[0]); continue; }
+                    if (!File.Exists(outPath) || File.GetLastWriteTimeUtc(d[0]) > File.GetLastWriteTimeUtc(outPath)) needs = true;
+                }
+            }
+            var bc = new TaskItem(src);
+            bc.SetMetadata("Command", effective);
+            bc.SetMetadata("BuiltFile", outPath);
+            bc.SetMetadata("BuiltDir", Path.GetDirectoryName(outPath) ?? "");
+            bc.SetMetadata("NeedsBuild", needs ? "true" : "false");
+            buildCmds.Add(bc);
+
+            AddStaged(outPath, relDir, outName, r);
+
+            // A CopiesTextures processor (egg2bam -pc) drops each referenced texture next to the output
+            // and rewrites the reference to that bare filename. Stage those copies beside it so the
+            // bundle is self-contained — which is why a game never declares its textures.
+            if (string.Equals(proc.GetMetadata("CopiesTextures"), "true", StringComparison.OrdinalIgnoreCase)
+                && texDeps.TryGetValue(src, out var copied))
+            {
+                string outDir = Path.GetDirectoryName(outPath) ?? "";
+                foreach (var t in copied)
+                {
+                    if (!string.Equals(t[1], "EXISTS", StringComparison.Ordinal)) continue;
+                    string texName = Path.GetFileName(t[0]);
+                    AddStaged(Path.Combine(outDir, texName), relDir, texName, r);
+                }
+            }
+        }
+
+        foreach (var c in Content ?? new ITaskItem[0])
+        {
+            string src = c.GetMetadata("FullPath");
+            string relDir = c.GetMetadata("RecursiveDir") ?? "";
+            AddStaged(src, relDir, Path.GetFileName(src), c);
+        }
+
+        var bundles = new List<ITaskItem>();
+        foreach (var kv in seenBundles)
+        {
+            int comp; int.TryParse(kv.Value, out comp);
+            var d = decls.FirstOrDefault(x => string.Equals(x.ItemSpec, kv.Key, StringComparison.OrdinalIgnoreCase));
+            string extra = d != null ? (d.GetMetadata("Options") ?? "") : "";
+            string flags = ((comp > 0 ? "-z " : "") + extra).Trim();
+            string mfPath = Path.GetFullPath(Path.Combine(ContentRoot, kv.Key));
+            var b = new TaskItem(kv.Key);
+            b.SetMetadata("StageDir", Path.GetFullPath(Path.Combine(StageDir, kv.Key)));
+            b.SetMetadata("MfPath", mfPath);
+            b.SetMetadata("MultifyFlags", flags);
+            bundles.Add(b);
+            // The .mf is a final output; publish it at the content root (Rel = bundle name).
+            var pubB = new TaskItem(mfPath);
+            pubB.SetMetadata("Rel", kv.Key);
+            published.Add(pubB);
+        }
+
+        BuildCommands = buildCmds.ToArray();
+        Staged = staged.ToArray();
+        Bundles = bundles.ToArray();
+        Published = published.ToArray();
+        return !Log.HasLoggedErrors;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- ===== Stage 0: resolve. Cheap; produces the item lists the stages consume. ===== -->
+  <Target Name="PandaResolve" DependsOnTargets="_PandaInit" Condition="'$(PandaResourcePipeline)' == 'true'">
+    <ItemGroup>
+      <_PandaResourceInput Include="@(PandaResource)" />
+      <!-- PandaEgg is sugar for a PandaResource pre-bound to the built-in Egg2Bam. -->
+      <_PandaResourceInput Include="@(PandaEgg)">
+        <Processor>Egg2Bam</Processor>
+      </_PandaResourceInput>
+    </ItemGroup>
+
+    <PandaResolveResources
+        Resources="@(_PandaResourceInput)"
+        Content="@(PandaContent)"
+        Processors="@(PandaProcessor)"
+        BundleDecls="@(PandaBundle)"
+        ToolsDir="$(Panda3DToolsDir)"
+        ToolExtension="$(Panda3DToolExtension)"
+        BuildDir="$(PandaBuildDir)"
+        StageDir="$(PandaStageDir)"
+        ContentRoot="$(PandaContentRoot)"
+        DefaultCompression="$(PandaDefaultCompression)"
+        AnalyzerExe="$(PandaAnalyzerExe)"
+        ModelRoots="$(PandaModelRoot)"
+        TrackTextures="$(PandaTrackTextures)">
+      <Output TaskParameter="BuildCommands" ItemName="_PandaBuildCommand" />
+      <Output TaskParameter="Staged" ItemName="_PandaStaged" />
+      <Output TaskParameter="Bundles" ItemName="_PandaBundleResolved" />
+      <Output TaskParameter="Published" ItemName="_PandaPublish" />
+    </PandaResolveResources>
+  </Target>
+
+  <!-- ===== Stage 1 (L3): run processors. Per-input up-to-date via NeedsBuild. ===== -->
+  <Target Name="PandaBuildResources" DependsOnTargets="PandaResolve"
+          Condition="'$(PandaResourcePipeline)' == 'true' and '@(_PandaBuildCommand)' != ''">
+    <MakeDir Directories="@(_PandaBuildCommand->'%(BuiltDir)')" />
+    <Message Importance="high" Text="Panda: %(_PandaBuildCommand.Filename)%(_PandaBuildCommand.Extension) -&gt; %(_PandaBuildCommand.BuiltFile)"
+             Condition="'%(_PandaBuildCommand.NeedsBuild)' == 'true'" />
+    <Exec Command="%(_PandaBuildCommand.Command)"
+          Condition="'%(_PandaBuildCommand.NeedsBuild)' == 'true'"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <!-- ===== Stage 2a: stage every asset (built output or loose source) to its dest. ===== -->
+  <Target Name="PandaStageAssets" DependsOnTargets="PandaBuildResources"
+          Condition="'$(PandaResourcePipeline)' == 'true' and '@(_PandaStaged)' != ''">
+    <Copy SourceFiles="@(_PandaStaged)" DestinationFiles="@(_PandaStaged->'%(Dest)')"
+          SkipUnchangedFiles="true" />
+    <!-- Only bundled assets drive a repack; touching a loose file must not repack a .mf. -->
+    <ItemGroup>
+      <_PandaBundledStaged Include="@(_PandaStaged)" Condition="'%(_PandaStaged.Bundle)' != ''" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ===== Stage 2b: pack each bundle. Recreate (-c) when any bundled file changed. ===== -->
+  <Target Name="PandaPackBundles" DependsOnTargets="PandaStageAssets"
+          Condition="'$(PandaResourcePipeline)' == 'true' and '@(_PandaBundleResolved)' != ''"
+          Inputs="@(_PandaBundledStaged->'%(Dest)')" Outputs="@(_PandaBundleResolved->'%(MfPath)')">
+    <MakeDir Directories="$(PandaContentRoot)" />
+    <Message Importance="high" Text="Panda: packing %(_PandaBundleResolved.Identity) -&gt; %(_PandaBundleResolved.MfPath)" />
+    <Exec Command="&quot;$(Panda3DMultify)&quot; -c %(_PandaBundleResolved.MultifyFlags) -f &quot;%(_PandaBundleResolved.MfPath)&quot; -C &quot;%(_PandaBundleResolved.StageDir)&quot; ." />
+  </Target>
+
+  <!-- ===== Driver: hang the pipeline off Build. The stages are listed in order here
+             (they also DependsOn each other) so the chain runs even when this target is
+             reached only via AfterTargets. ===== -->
+  <Target Name="PandaResources" AfterTargets="Build"
+          Condition="'$(PandaResourcePipeline)' == 'true'"
+          DependsOnTargets="_PandaInit;PandaResolve;PandaBuildResources;PandaStageAssets;PandaPackBundles">
+    <Message Importance="normal" Text="Panda: resource pipeline complete -&gt; $(PandaContentRoot)" />
+  </Target>
+
+  <!-- ===== Publish: carry the produced bundles + loose files into the publish dir at the
+             same layout they have next to the build output. Runs during `dotnet publish`
+             only (hooks the publish item computation); the pipeline itself already ran via
+             AfterTargets="Build", so the files exist. ===== -->
+  <Target Name="PandaPublishResources"
+          BeforeTargets="ComputeFilesToPublish"
+          DependsOnTargets="PandaResolve;PandaBuildResources;PandaStageAssets;PandaPackBundles"
+          Condition="'$(PandaResourcePipeline)' == 'true' and '@(_PandaPublish)' != ''">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(_PandaPublish)">
+        <RelativePath>%(_PandaPublish.Rel)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <!-- ===== Clean: wipe the intermediate caches and delete exactly the files the pipeline
+             produced. Content root is $(OutDir) now, so we must NOT RemoveDir it — delete
+             the specific loose files + bundles instead. ===== -->
+  <Target Name="PandaCleanResources" BeforeTargets="Clean"
+          DependsOnTargets="_PandaInit;PandaResolve" Condition="'$(PandaResourcePipeline)' == 'true'">
+    <Delete Files="@(_PandaPublish)" />
+    <RemoveDir Directories="$(PandaBuildDir);$(PandaStageDir)" />
+  </Target>
+
+</Project>

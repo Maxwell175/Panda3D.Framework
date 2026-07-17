@@ -1,0 +1,17 @@
+<Project>
+
+  <!-- Inherit the repo-wide conventions (target framework, bindings, docs, …). -->
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
+
+  <PropertyGroup>
+    <!--
+      The framework libraries are trim- and AOT-compatible. IsAotCompatible marks each assembly as
+      trimmable AND turns on the trim / AOT / single-file analyzers, so any trim-unsafe pattern
+      (unannotated reflection over a generic, reflection-based serialization, …) fails the build here
+      rather than surfacing in a consumer's published app. Scoped to src/ so tests and samples don't
+      carry the marker or the analyzer noise.
+    -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+</Project>

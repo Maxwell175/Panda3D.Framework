@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Panda3D.Framework.Samples.RoamingRalphMultiplayer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Panda3D.Framework/Panda3D.Framework.csproj" />
+    <PackageReference Include="RiptideNetworking.Riptide" Version="2.2.1" />
+    <PackageReference Include="Panda3D.Framework.Build" Version="$(PandaFrameworkBuildVersion)" />
+  </ItemGroup>
+
+  <!-- Source eggs are built to .bam and packed into ralph.mf; both the client and the bot mount it. -->
+  <ItemGroup>
+    <PandaEgg Include="../models/*.egg.pz" Bundle="ralph.mf" />
+    <PandaBundle Include="ralph.mf" Compression="6" />
+  </ItemGroup>
+
+</Project>

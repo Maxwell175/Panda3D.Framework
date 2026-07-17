@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Panda3D.Framework.Hosting</RootNamespace>
+    <PackageId>Panda3D.Framework.Hosting</PackageId>
+    <Description>The application lifecycle and the Poll-only frame loop: GameApplication (builder -> Build -> Run), AddHostedTask/AddBootstrap/AddSceneManager.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Scheduling/Panda3D.Framework.Scheduling.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+</Project>

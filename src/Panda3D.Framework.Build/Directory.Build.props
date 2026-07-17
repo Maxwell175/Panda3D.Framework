@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- This is a build-tooling (MSBuild-only) package: no bindings, no runtime output.
+       Opt out of the repo-wide binding injection BEFORE importing the parent props so
+       the root's PackageReference/ProjectReference ItemGroup (gated on PandaBindings)
+       never adds Panda3D.Interop / Panda3D.Async here. -->
+  <PropertyGroup>
+    <PandaBindings>false</PandaBindings>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
+
+</Project>

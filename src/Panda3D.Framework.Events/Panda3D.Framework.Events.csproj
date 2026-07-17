@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Panda3D.Framework.Events</RootNamespace>
+    <PackageId>Panda3D.Framework.Events</PackageId>
+    <Description>The C#/Panda event seam: the per-frame queue-drain pump replacing direct's messenger, plus INamedEventBus and IObservable notifications.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Scheduling/Panda3D.Framework.Scheduling.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Panda3D.Framework.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+  </ItemGroup>
+
+</Project>

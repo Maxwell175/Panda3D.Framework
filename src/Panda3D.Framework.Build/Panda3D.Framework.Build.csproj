@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Panda3D.Framework.Build — the resource pipeline as an MSBuild-only NuGet package.
+    Ships NO runtime assembly: only buildTransitive/*.props + *.targets, which flow to
+    direct AND transitive consumers. Depends on Panda3D.Tools (the native CLI bundle),
+    which flows transitively so consumers get $(Panda3DMultify)/$(Panda3DEgg2Bam)/… too.
+  -->
+
+  <PropertyGroup>
+    <PackageId>Panda3D.Framework.Build</PackageId>
+    <Description>Build-time resource pipeline for Panda3D.Framework: blind copy, multifile packing, and egg2bam/custom processors, driven from the .csproj over Panda3D.Tools.</Description>
+
+    <!-- Build-tooling package: no lib output, and nothing to compile. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IncludeBuildOutputInPackage>false</IncludeBuildOutputInPackage>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <IsAotCompatible>false</IsAotCompatible>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- NU5128: dependencies declared but no lib/ref — expected for a build-only package. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+
+    <!-- Tools bundle version. Floats with the engine line; override on the CLI to pin. -->
+    <PandaToolsVersion Condition="'$(PandaToolsVersion)' == ''">1.11.0-preview.*</PandaToolsVersion>
+    <!-- The texture-dependency analyzer tool (its own repo, its own version line). -->
+    <PandaModelDepsVersion Condition="'$(PandaModelDepsVersion)' == ''">*</PandaModelDepsVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The pipeline. buildTransitive so it applies to direct and transitive references. -->
+    <None Include="buildTransitive\Panda3D.Framework.Build.props"
+          Pack="true" PackagePath="buildTransitive\Panda3D.Framework.Build.props" />
+    <None Include="buildTransitive\Panda3D.Framework.Build.targets"
+          Pack="true" PackagePath="buildTransitive\Panda3D.Framework.Build.targets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Both flow transitively (buildTransitive), so one PackageReference gets a consumer the
+         pipeline + the native CLIs (egg2bam/multify, via $(Panda3D*)) + the texture-dependency
+         analyzer (via $(PandaModelDeps)). Panda3D.ModelDeps is versioned in its own repo. -->
+    <PackageReference Include="Panda3D.Tools" Version="$(PandaToolsVersion)" />
+    <PackageReference Include="Panda3D.ModelDeps" Version="$(PandaModelDepsVersion)" />
+  </ItemGroup>
+
+</Project>

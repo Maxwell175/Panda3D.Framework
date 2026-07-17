@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Panda3D.Framework.Audio.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Panda3D.Runtime.linux-x64" Version="$(PandaRuntimeVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Panda3D.Framework.Audio/Panda3D.Framework.Audio.csproj" />
+    <ProjectReference Include="../../src/Panda3D.Framework.Events/Panda3D.Framework.Events.csproj" />
+    <ProjectReference Include="../../src/Panda3D.Framework.Hosting/Panda3D.Framework.Hosting.csproj" />
+    <ProjectReference Include="../../src/Panda3D.Framework.Scheduling/Panda3D.Framework.Scheduling.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Panda3D.Framework.Samples.SpinningCard</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Panda3D.Framework/Panda3D.Framework.csproj" />
+  </ItemGroup>
+
+</Project>

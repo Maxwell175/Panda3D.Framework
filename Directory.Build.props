@@ -1,0 +1,59 @@
+<Project>
+
+  <!--
+    Shared build conventions for every project in Panda3D.Framework.
+
+    Reference model (see docs/00-overview.md §3):
+      * Panda3D.Interop  — the generated C# bindings (namespace Panda3D.Core),
+        pulled as a NuGet package pinned to the 1.11 preview line. Async's own
+        transitive reference unifies with this to a single assembly identity.
+      * Panda3D.Async    — the coroutine/PandaTask layer, project-referenced
+        from the sibling repo so the two evolve together (both "in scope").
+
+    Individual projects opt out by setting <PandaBindings>false</PandaBindings>.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Ship XML docs so package consumers get IntelliSense tooltips. CS1591 (missing doc on a
+         public member) is suppressed: docs that exist are shipped; members without one just have no
+         tooltip rather than failing/spamming the build. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- Version line tracks the engine/bindings. -->
+    <Version>0.1.0</Version>
+    <Authors>Panda3D.Framework</Authors>
+
+    <!-- Binding coordinates, overridable from the command line. -->
+    <PandaInteropVersion Condition="'$(PandaInteropVersion)' == ''">1.11.0-preview.*</PandaInteropVersion>
+    <PandaRuntimeVersion Condition="'$(PandaRuntimeVersion)' == ''">1.11.0-preview.*</PandaRuntimeVersion>
+    <!-- The build-time resource pipeline (docs/04-resources.md), used by the samples. -->
+    <PandaFrameworkBuildVersion Condition="'$(PandaFrameworkBuildVersion)' == ''">0.1.0</PandaFrameworkBuildVersion>
+
+    <!-- Always compile the Framework against the full (Debug) binding surface, in every
+         configuration, so debug-only engine APIs (e.g. collision visualization) can be
+         called unconditionally and ship baked into the assemblies. Consumers pick their
+         own variant: a Debug/JIT build resolves these against a Standard runtime and they
+         work; an optimized/AOT build against the lean bindings turns any that are reached
+         into a throw-stub (trimmed when unused, MissingMethodException only if invoked) —
+         no compile guards here and no AOT link error. Override on the command line if you
+         specifically want to compile the Framework itself against the lean surface. -->
+    <Panda3DInteropConfiguration Condition="'$(Panda3DInteropConfiguration)' == ''">Debug</Panda3DInteropConfiguration>
+    <PandaAsyncProject Condition="'$(PandaAsyncProject)' == ''">$(MSBuildThisFileDirectory)../Panda3D.Async/src/Panda3D.Async/Panda3D.Async.csproj</PandaAsyncProject>
+
+    <PandaBindings Condition="'$(PandaBindings)' == ''">true</PandaBindings>
+  </PropertyGroup>
+
+  <!-- Bindings + coroutine layer, added to every project unless opted out. -->
+  <ItemGroup Condition="'$(PandaBindings)' == 'true'">
+    <PackageReference Include="Panda3D.Interop" Version="$(PandaInteropVersion)" />
+    <ProjectReference Include="$(PandaAsyncProject)" />
+  </ItemGroup>
+
+</Project>

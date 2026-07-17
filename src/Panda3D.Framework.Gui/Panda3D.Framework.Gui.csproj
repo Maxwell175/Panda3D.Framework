@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Panda3D.Framework.Gui</RootNamespace>
+    <PackageId>Panda3D.Framework.Gui</PackageId>
+    <Description>Scoped view GUI services and typed C# wrappers over Panda3D's native PGui widgets.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Events/Panda3D.Framework.Events.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Rendering/Panda3D.Framework.Rendering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Panda3D.Framework.Gui.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+  </ItemGroup>
+
+</Project>

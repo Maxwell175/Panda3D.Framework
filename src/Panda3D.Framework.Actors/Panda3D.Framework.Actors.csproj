@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Panda3D.Framework.Actors</RootNamespace>
+    <PackageId>Panda3D.Framework.Actors</PackageId>
+    <Description>Actor loading and animation composition over Panda's native Character, AnimControl, PartBundle, and interval bindings.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Intervals/Panda3D.Framework.Intervals.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Panda3D.Framework.Actors.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+</Project>

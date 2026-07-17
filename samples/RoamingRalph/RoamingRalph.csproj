@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Panda3D.Framework.Samples.RoamingRalph</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Panda3D.Framework/Panda3D.Framework.csproj" />
+    <PackageReference Include="Panda3D.Framework.Build" Version="$(PandaFrameworkBuildVersion)" />
+  </ItemGroup>
+
+  <!-- Source eggs are built to .bam and packed into ralph.mf next to the executable; the app mounts it. -->
+  <ItemGroup>
+    <PandaEgg Include="../models/*.egg.pz" Bundle="ralph.mf" />
+    <PandaBundle Include="ralph.mf" Compression="6" />
+  </ItemGroup>
+
+</Project>

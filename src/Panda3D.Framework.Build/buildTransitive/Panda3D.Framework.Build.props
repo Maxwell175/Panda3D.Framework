@@ -1,0 +1,40 @@
+<Project>
+
+  <!-- ================================================================================
+       Panda3D.Framework resource pipeline — early (props) half.
+
+       Imported at the TOP of the consuming build, before Panda3D.Tools has set its
+       $(Panda3D*) tool-path properties. So NOTHING here may reference those: the
+       built-in processors below carry only BARE tool names (BuiltIn="true"), which the
+       resolver task turns into host-bundle paths at execution time. See the .targets
+       file for the pipeline itself.
+       ================================================================================ -->
+
+  <PropertyGroup>
+    <!-- Master switch. Set false to disable the whole pipeline for a project. -->
+    <PandaResourcePipeline Condition="'$(PandaResourcePipeline)' == ''">true</PandaResourcePipeline>
+  </PropertyGroup>
+
+  <!-- Built-in processors. A game adds its own <PandaProcessor> items in the project
+       body; both are unioned by the time the targets run.
+
+       {input}/{output}/{filename}/{options}/{inputdir}/{outputdir} are substituted per
+       input. {options} carries a resource item's Options metadata (extra tool flags) —
+       the built-in Args below cover only the common case, so Options is the pass-through
+       for the rest of the tool's surface. A fully custom command is a user PandaProcessor
+       with its own Command. -->
+  <ItemGroup Condition="'$(PandaResourcePipeline)' == 'true'">
+    <!-- -pc makes egg2bam copy every referenced texture next to the .bam it writes AND rewrite the
+         reference to the bare filename. That keeps the file and the reference consistent by
+         construction, and lets the pipeline stage the copies into the bundle automatically — so a
+         game never has to declare its textures. CopiesTextures tells the resolver to do that. -->
+    <PandaProcessor Include="Egg2Bam"
+                    BuiltIn="true"
+                    Tool="egg2bam"
+                    Extensions=".egg;.egg.pz"
+                    Args="-o &quot;{output}&quot; -pc &quot;{outputdir}&quot; {modelroots} {options} &quot;{input}&quot;"
+                    OutputExtension=".bam"
+                    CopiesTextures="true" />
+  </ItemGroup>
+
+</Project>

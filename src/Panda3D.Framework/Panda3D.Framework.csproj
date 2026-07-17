@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Panda3D.Framework</PackageId>
+    <Description>The complete Panda3D.Framework: every feature library, the C# bindings, and the native
+      runtimes. Reference this one package to build and run a game.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Panda3D.Framework.Abstractions/Panda3D.Framework.Abstractions.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Actors/Panda3D.Framework.Actors.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Audio/Panda3D.Framework.Audio.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Events/Panda3D.Framework.Events.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Gui/Panda3D.Framework.Gui.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Hosting/Panda3D.Framework.Hosting.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Input/Panda3D.Framework.Input.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Intervals/Panda3D.Framework.Intervals.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Particles/Panda3D.Framework.Particles.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Physics/Panda3D.Framework.Physics.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Rendering/Panda3D.Framework.Rendering.csproj" />
+    <ProjectReference Include="../Panda3D.Framework.Scheduling/Panda3D.Framework.Scheduling.csproj" />
+  </ItemGroup>
+
+  <!-- Every supported native runtime; NuGet deploys only the build's target RID. -->
+  <ItemGroup>
+    <PackageReference Include="Panda3D.Runtime.linux-x64" Version="$(PandaRuntimeVersion)" />
+    <PackageReference Include="Panda3D.Runtime.osx-x64" Version="$(PandaRuntimeVersion)" />
+    <PackageReference Include="Panda3D.Runtime.osx-arm64" Version="$(PandaRuntimeVersion)" />
+    <PackageReference Include="Panda3D.Runtime.win-x64" Version="$(PandaRuntimeVersion)" />
+  </ItemGroup>
+
+</Project>
