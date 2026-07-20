@@ -1,6 +1,6 @@
 # 00 — Architecture Overview
 
-> **Status:** design of record, top level. The earlier single design doc is now split: this is the overview; one sub-document per project follows (see the index at the end). Working namespace `Panda3D.Framework.*` is a **placeholder** — rename freely.
+> **Status:** design of record, top level. The earlier single design doc is now split: this is the overview; one sub-document per project follows (see the index at the end). The package family is `Panda3D.Framework.*`; the `Panda3D.Framework` umbrella package is the one-reference entry point that pulls in every feature library, the C# bindings, and all four native runtimes.
 >
 > **Background references:** the subsystem-by-subsystem mapping of Python `direct` and the DI→ECS path live in the first research report; the Panda3D core/rendering object model and per-window scoping live in the second. This document and its siblings are the *design*; those two are the *research* behind it.
 
@@ -8,9 +8,11 @@
 
 ## 1. Architecture in one page
 
-The library replaces Python `direct` (ShowBase, taskMgr, messenger, intervals, Actor, GUI, …) with C# building blocks composed by **dependency injection**. It runs on the `Maxwell175/panda3d` fork (`csharp` branch, Panda3D 1.11 — the engine + C# bindings, including `CSHARP_EXTENSION` members) with `Maxwell175/Panda3d.Async` providing the async/coroutine layer.
+The library replaces Python `direct` (ShowBase, taskMgr, messenger, intervals, Actor, GUI, …) with C# building blocks composed by **dependency injection**. It runs on the `Maxwell175/panda3d` fork (`csharp` branch, Panda3D 1.11 — the engine + C# bindings, including `CSHARP_EXTENSION` members), consumed as the **`Panda3D.Interop`** binding package (namespace `Panda3D.Core`) with **`Panda3D.Async`** providing the async/coroutine layer.
 
 **The guiding goal:** combine **maximum flexibility** — even very complex setups (multiple windows over one shared scene, multiple independent scene roots à la the two screens of a DS, per-zone MMO server simulation, headless builds) should be natural, not fought for — with **simple defaults** that let someone pick the library up and start prototyping in a few lines. Every subsystem should have an easy `AddXxx()` path *and* expose the explicit seams underneath it.
+
+**The recommended entry point** is the `Panda3D.Framework` umbrella package: one reference pulls in every feature library, the C# bindings, and all four native runtimes (`linux-x64`, `osx-x64`, `osx-arm64`, `win-x64`). On top of the per-subsystem `AddXxx` seams it ships two conveniences — `AddGame(Action<ViewOptions>?)`, which wires scene + events + clock + scheduler + rendering + a window + input in a single call, and `AddViewBootstrap(...)`, which registers the entry coroutine in the *main view's* scope so per-view services (`IInput`, `IGui`) inject directly. The minimal `SpinningCard` sample is the whole shape: `AddGame`, `AddViewBootstrap`, `builder.Build().Run()`.
 
 Five decisions shape everything:
 
@@ -28,8 +30,9 @@ No ShowBase antipatterns survive: no god-object, no global `base`/builtins, no i
 
 | Project | Replaces in `direct` | Key public types | Doc |
 |---|---|---|---|
+| **`Panda3D.Framework`** *(umbrella meta-package — the recommended entry point)* | — | `AddGame(Action<ViewOptions>?)`, `AddViewBootstrap(Func<IServiceProvider,PandaTask>` / injected `Delegate)`; pulls in every feature library, the bindings, and all four native runtimes | this doc |
 | `…Abstractions` | (contracts for all of the below) | the `IXxx` interfaces, `XxxOptions`, `AddXxx` signatures | [01](01-abstractions.md) |
-| `…Hosting` | `ShowBase.run`, the main loop | `GameApplication`, `AddHostedTask`, `AddBootstrap`, `AddSceneManager` (impl of `ISceneManager`) | [02](02-hosting.md) |
+| `…Hosting` | `ShowBase.run`, the main loop | `GameApplication` (`CreateBuilder`/`Run`), `AddBootstrap` (three overloads: class `<T>`, `Func<IServiceProvider,PandaTask>`, injected `Delegate`), `AddSceneManager` (impl of `ISceneManager`) | [02](02-hosting.md) |
 | `…Rendering` | ShowBase window/pipe/camera setup, `igLoop` | `IView`, `IViewManager`, `ICameraRig`, `AddEngine/Window/Rendering` | [03](03-rendering.md) |
 | `…Input` | ShowBase data graph, `dataLoop`, key events | `IInput`, `IInputContext`, `IDevices`, `AddInput` | [05](05-input.md) |
 | `…Events` | `messenger` + `DirectObject.accept` | queue-drain pump, `INamedEventBus`; `IObservable<T>` on objects | [06](06-events.md) |
@@ -37,7 +40,8 @@ No ShowBase antipatterns survive: no god-object, no global `base`/builtins, no i
 | `…Intervals` | `direct.interval` (Lerp/Sequence/Parallel/Func) | `Sequence`, `Parallel`, `Lerp<T>`, `IIntervalManager` over C++ `CInterval` | [08](08-intervals.md) |
 | `…Actors` | `direct.actor.Actor`, `ActorInterval` | `IActor`, `IActorLoader`, `ActorInterval`, `CrossFade` over native `AnimControl`/`PartBundle` | [09](09-actors-animation.md) |
 | `…Gui` | `direct.gui.DirectGui` | `IGui`, `Widget` classes (`Button`/`Entry`/`Slider`/…) over PGui | [10](10-gui.md) |
-| `…Physics` | `base.cTrav`, collision patterns, `enableParticles`, `ParticleEffect` | `ICollisionWorld` (observables of native entries), `IParticles`, `ParticleEffect`, `ParticleInterval`; Bullet used natively | [11](11-physics-collision.md) |
+| `…Physics` | `base.cTrav`, collision patterns | `ICollisionWorld`, `ICollisionQuery`, `RaycastHit` (observables of native `CollisionEntry`), `AddCollision`; Bullet used natively | [11](11-physics-collision.md) |
+| `…Particles` | `enableParticles`, `ParticleEffect`, `ParticleInterval` | `IParticles`, `ParticleEffect`, `ParticleInterval`, `AddParticles` over native `ParticleSystemManager` | [11](11-physics-collision.md) |
 | `…Audio` | ShowBase audio managers, `Audio3DManager` | `IAudio`, `IAudio3D` over native `AudioManager`/`AudioSound` | [12](12-audio-misc.md) |
 | `…Build` *(build-time, MSBuild-only)* | manual `egg2bam`/`multify` runs, ad-hoc asset copy | items `PandaContent`, `PandaResource`+`PandaProcessor`, `PandaBundle`; no runtime dll | [04](04-resources.md) |
 
@@ -45,7 +49,7 @@ No ShowBase antipatterns survive: no god-object, no global `base`/builtins, no i
 
 ## 3. Dependency graph
 
-Per-project references (framework projects only; every project also references `Abstractions`, and all may reference the bindings — `Maxwell175/panda3d` C# + `Panda3d.Async` — which is not repeated below):
+Per-project references (framework projects only; every project also references `Abstractions`, and all may reference the bindings — the `Panda3D.Interop` package (namespace `Panda3D.Core`) + `Panda3D.Async` — which is not repeated below):
 
 | Project | References (framework) | Notes |
 |---|---|---|
@@ -57,11 +61,13 @@ Per-project references (framework projects only; every project also references `
 | `Input` | `Rendering`, `Events`, `Scheduling` | needs a `GraphicsWindow`; device observables via the pump; dataLoop task |
 | `Intervals` | `Scheduling`, `Events` | steps C++ `CIntervalManager`; awaitable via done-event/pump |
 | `Actors` | `Intervals` | playback/blending on native `AnimControl`/`PartBundle`; no animation events (engine raises none) |
-| `Physics+Collision` | `Events`, `Scheduling`, `Intervals` | traverse/update as frame tasks; collision observables (native `CollisionEntry` payloads); `ParticleInterval` |
+| `Physics` | `Events`, `Scheduling` | collision traverse/query as frame tasks; collision observables (native `CollisionEntry` payloads) |
+| `Particles` | `Scheduling`, `Intervals` | particle-system update as a frame task; `ParticleInterval` |
 | `GUI` | `Rendering`, `Events` | widgets over PGui; observables via the pump; (+ audio optional, widget sounds) |
-| `Hosting` | (none at compile time) | + `Microsoft.Extensions.Hosting`; the app's `Program.cs` composes concrete modules |
+| `Hosting` | `Scheduling` | + `Microsoft.Extensions.Hosting`; the app's `Program.cs` composes concrete modules |
+| `Panda3D.Framework` (umbrella) | *every feature library* | meta-package; also brings the native `Panda3D.Runtime.<rid>` packages (`linux-x64`/`osx-x64`/`osx-arm64`/`win-x64`) |
 
-Layering, stated plainly: `Abstractions` is the base (contracts only). `Scheduling` and `Events` are the low-level runtime seams. Rendering, Audio, Input, Intervals, Actors, Physics+Collision, and GUI compose those seams as shown in the table (`ISceneManager` is a contract in `Abstractions`; its trivial implementation ships in `Hosting`). `Hosting` owns the loop; the app's `Program.cs` is the place that references concrete modules together. The graph is acyclic.
+Layering, stated plainly: `Abstractions` is the base (contracts only). `Scheduling` and `Events` are the low-level runtime seams. Rendering, Audio, Input, Intervals, Actors, Physics, Particles, and GUI compose those seams as shown in the table (`ISceneManager` is a contract in `Abstractions`; its trivial implementation ships in `Hosting`). `Hosting` owns the loop; the app's `Program.cs` is the place that references concrete modules together. The graph is acyclic.
 
 ---
 
@@ -82,12 +88,12 @@ One epoch of `taskManager.Poll()` runs the default chain's tasks in sort order. 
 
 | sort | slot | owner |
 |---|---|---|
-| −51 | `resetPrevTransform` — fluid-motion bookkeeping (adopted: fluid lerps/pushers, 08/11) | Physics+Collision |
+| −51 | `resetPrevTransform` — fluid-motion bookkeeping (adopted: fluid lerps/pushers, 08/11) | Physics |
 | −50 | `dataLoop` — data-graph traverse, input current | Input |
 | −1 | `eventManager` — drain queued Panda events before gameplay reads observables | Events |
 | **0** | **gameplay** — C# coroutine resumption + user frame tasks (default sort) | Hosting/Scheduling |
 | 20 | `ivalLoop` — interval/tween stepping | Intervals |
-| 30 | `collisionLoop` — explicit collision traverse | Physics+Collision |
+| 30 | `collisionLoop` — explicit collision traverse | Physics |
 | 50 | `igLoop` — `engine.RenderFrame()`, renders every output | Rendering |
 | 60 | `audioLoop` — audio manager update | Audio |
 
@@ -101,17 +107,17 @@ Pacing comes from `RenderFrame()` + vsync blocking inside `igLoop`. **Headless (
 
 ## 6. Build/run shapes
 
-**Client** registers engine + window + world + input + rendering (+ gameplay modules) and calls `app.Run()`, which pumps on the main thread.
+**Client** registers engine + window + world + input + rendering (+ gameplay modules) and calls `app.Run()`, which pumps on the main thread. This is the `SpinningCard` and `RoamingRalph` shape: `AddGame` plus the feature modules the game needs (`AddActors`, `AddCollision`, …), then `builder.Build().Run()`. All three samples (`SpinningCard`, `RoamingRalph`, `RoamingRalphMultiplayer`) use top-level statements — the composition root is `Program.cs` itself, no `static Main`.
 
-**Server** registers world (headless) + pacing + simulation, omits rendering/window/input, and calls `app.Run()` — the same pump, blocking until shutdown (Ctrl-C/SIGTERM via `ApplicationStopping`). With no graphics context there's nothing to render, so the loop just polls the simulation tasks; per-zone simulation can be ordinary hosted tasks/services matching per-zone scopes. The only difference between client and server is which modules are registered, not the entry shape.
+**Server** registers world (headless) + pacing + simulation, omits rendering/window/input, and calls `app.Run()` — the same pump, blocking until shutdown (Ctrl-C/SIGTERM via `ApplicationStopping`). With no graphics context there's nothing to render, so the loop just polls the simulation tasks; per-zone simulation can be ordinary hosted tasks/services matching per-zone scopes. The only difference between client and server is which modules are registered, not the entry shape. `RoamingRalphMultiplayer` demonstrates exactly this: one `Program.cs` whose `--bot` path registers scene + events + clock + scheduler + collision (no rendering/window/input) while the default path adds `AddGame` + `AddGui` + `AddActors` — same builder, same `Run()`.
 
 ---
 
 ## 7. Phasing
 
 - **v1** — all projects above with DI, no ECS. Milestones:
-  1. Port `asteroids-async` onto the framework (the "simple default" path: a few `AddXxx` lines to a running prototype).
-  2. A headless server build compiles against the same gameplay assembly.
+  1. A sample game on the framework demonstrating the "simple default" path (a few `AddXxx` lines to a running prototype) — realized by `SpinningCard` (minimal, no assets) and `RoamingRalph`.
+  2. A headless server build compiling against the same gameplay assembly — realized by `RoamingRalphMultiplayer`, whose `--bot` mode shares one `Program.cs` with the rendered client.
   3. **Multi-view acceptance:** a second window viewing the *same* scene via a second camera (shared GSG) works, **and** two windows each with an *independent* scene root (the DS-two-screens shape) works — both as registration changes only.
 - **v2** — optional ECS guidance and thin glue (not a framework abstraction): a documented pattern for running a chosen ECS library's schedule as a frame task at a documented sort, and a `TransformSync` example bridging ECS transforms to the scene graph. Developers who don't want ECS are unaffected.
 

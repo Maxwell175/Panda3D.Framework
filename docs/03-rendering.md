@@ -15,11 +15,15 @@ public interface IView : IDisposable {
     IServiceProvider Services { get; }          // this view's DI scope (per-view services: IInput, IGui, …)
     bool IsClosed { get; }
     ICameraRig Camera { get; }                  // the main 3-D camera rig
+    IReadOnlyList<ICameraRig> Cameras { get; }  // the main rig + any added via AddCamera
+    ICameraRig AddCamera(NodePath? scene = null); // extra rig (split-screen/PiP/minimap); scene defaults to this view's root
+    LVecBase4f ClearColor { get; set; }         // the output's background clear color; setting it also enables clearing
     NodePath? Overlay2d { get; }                // aspect2d-equivalent root (kept aspect-correct; null when Setup2d=false)
     NodePath? Pixel2d { get; }                  // pixel-exact root (1 unit = 1 pixel; null when Setup2d=false)
-    IReadOnlyDictionary<string, NodePath> OverlayAnchors { get; } // top-left, bottom-right, centers, ...
+    IReadOnlyDictionary<OverlayAnchor, NodePath> OverlayAnchors { get; } // keyed by the OverlayAnchor enum: TopLeft, BottomRight, Center, …
     IReadOnlyList<IDisplayRegion> Regions { get; }
     IDisplayRegion AddRegion(DisplayRegionOptions o);   // split-screen / extra cameras
+    void ShowFrameRate();  void HideFrameRate();        // built-in frame-rate meter in this view's corner (idempotent)
 
     // Window notifications, as System.Reactive observables (see 06). All demuxed from Panda's single
     // per-window "window-event" by diffing WindowProperties — see "Window-event demux" below.
@@ -33,7 +37,8 @@ public interface IViewManager {                 // engine-wide; runtime open/clo
     IView OpenView(ViewOptions o);              // creates + seeds a per-output scope (see note)
     void CloseView(IView view);                 // disposes that scope deterministically
     IReadOnlyList<IView> Views { get; }
-    IView Main { get; }                         // the default view (first-opened unless configured)
+    IView Main { get; }                         // the default view (first-opened); throws if none open yet
+    IView? MainOrNull { get; }                  // the default view, or null if none open yet
 }
 
 // The one rendering wrapper that earns its place: composed lens/camera ergonomics (not passthrough).
@@ -64,11 +69,12 @@ public static class RenderingServiceCollectionExtensions {
 
 `IViewManager` is imperative and works on bare MS.DI. A developer who wants views as **resolvable named services** can layer that on with a container that supports runtime registration (e.g. DryIoc) and register each `IView` under a key — the framework neither requires nor prevents it (container-agnostic, 00 §4).
 
-**`igLoop` registration (conceptual).**
+**`igLoop` registration.**
 ```csharp
-.AddHostedTask(name: "igLoop", sort: FrameSlots.Render, run: (sp, ct) => {
-    sp.GetRequiredService<IRenderingService>().RenderFrame();  // renders all views' outputs and ticks the global clock in rendered builds
-    return TaskResult.Continue;
+services.AddFrameTask("igLoop", FrameSlots.Render, sp =>
+{
+    var rendering = sp.GetRequiredService<IRenderingService>();
+    return () => { rendering.RenderFrame(); return true; };  // renders all views' outputs; ticks the global clock in rendered builds
 });
 ```
 One `igLoop` renders every open view's output.
@@ -81,12 +87,12 @@ One `igLoop` renders every open view's output.
 - if **tall** (`ar < 1`): `overlay2d.SetScale(1, ar, ar)`, edges at top/bottom = ±1/ar, left/right = ∓1;
 - `pixel2d.SetScale(2/width, 1, 2/height)` so one unit = one pixel.
 
-The view also maintains the named `OverlayAnchors` (`top-left`, `bottom-right`, centers, …) under `Overlay2d` so corner-anchored UI sticks to corners as the output resizes, exactly as ShowBase does. `Setup2d = false` skips all of this for views that don't need an overlay (e.g. an offscreen or pure-3-D secondary output).
+The view also maintains the `OverlayAnchors` (keyed by the `OverlayAnchor` enum — `TopLeft`, `BottomRight`, `Center`, …) under `Overlay2d` so corner-anchored UI sticks to corners as the output resizes, exactly as ShowBase does. `Setup2d = false` skips all of this for views that don't need an overlay (e.g. an offscreen or pure-3-D secondary output).
 
 **Multi-window resource sharing.** When a view should share textures/vertex buffers/RTT with another (rather than be fully independent), open its output sharing the first view's GSG: under the wrapper, `engine.MakeOutput(pipe, name, 0, fb, wp, BF_require_window, gsgA, hostA)` with `gsgA = firstWindow.Window.GetGsg()`. Keep all shared-resource windows on the default pipe. Fully independent windows (different roots, no shared resources) just get their own GSG.
 
 **Design notes.**
-- **How per-view services bind to their view (the seeded scope).** `OpenView` creates the scope from `IServiceScopeFactory` and immediately seeds a scoped holder — `ViewContext { IView? View }` — the `IHttpContextAccessor` idiom, view-shaped. Per-view services (`IGui`, `IInput`, …) take `ViewContext` in their constructor, so resolving them **from `view.Services`** binds them to that view — fully explicit, no ambient state: `viewB.Services.GetRequiredService<IGui>()`. Resolving the same services at the **root** provider falls back to `IViewManager.Main`, keeping the single-window prototype one line. Closing a view disposes its scope, which disposes every service and subscription created in it.
+- **How per-view services bind to their view (the seeded scope).** `OpenView` creates the scope from `IServiceScopeFactory` and immediately seeds a scoped holder — `ViewContext { IView? View }` — the `IHttpContextAccessor` idiom, view-shaped. Per-view services (`IGui`, `IInput`, …) take `ViewContext` in their constructor, so resolving them **from `view.Services`** binds them to that view — fully explicit, no ambient state: `viewB.Services.GetRequiredService<IGui>()`. Resolving a per-view service from the **root** provider has no view to bind to and throws, so per-view services are always reached through a view: get the main view via `IViewManager.Main` (or `MainOrNull` when one may not exist yet) and resolve from its `Services` — [Input](05-input.md) adds a `view.Input()` shortcut. Closing a view disposes its scope, which disposes every service and subscription created in it.
 - **GSG is the one cross-tier object.** Each output has one GSG, but a shared GSG can back several outputs; model the shared GSG as a singleton injected into per-view scopes when sharing is wanted.
 - **Render is movable.** Because it's a sorted task, half-rate render, an RTT pre-pass (lower sort), or additional views are registration/runtime changes, not loop changes.
 - **Clock ownership.** `RenderFrame()` advances the global clock in rendered builds. Rendering registers an `IClockTickSource` marker so [07](07-scheduling-and-time.md)'s `AddClock` does not also enable `tick_clock` on the default chain. Dropping this project for a headless build does not stop the clock: with no render tick source registered, `AddClock` enables chain ticking instead.

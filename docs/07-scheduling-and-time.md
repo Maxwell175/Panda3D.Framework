@@ -19,17 +19,33 @@ public interface IFrameScheduler {
 public interface IScheduledTask : IDisposable { string? Name { get; } int Sort { get; } }
 
 public static class SchedulingServiceCollectionExtensions {
-    public static IServiceCollection AddClock(this IServiceCollection s, Action<ClockOptions>? o = null); // ticking chain + pacing
-    public static IServiceCollection AddScheduler(this IServiceCollection s);
+    public static IServiceCollection AddClock(this IServiceCollection s, Action<ClockOptions>? configure = null); // ticking chain + pacing
+    public static IServiceCollection AddScheduler(this IServiceCollection s);   // also ensures an IGameClock to read
 }
 public sealed class ClockOptions {
-    public bool LimitFrameRate { get; set; }      // -> ClockObject mode M_limited
+    public bool LimitFrameRate { get; set; }      // -> ClockObject.SetMode(M_limited)
     public double MaxFps { get; set; } = 60;       // -> SetFrameRate
     public double MaxDt { get; set; }              // -> SetMaxDt; caps the dt spike on a long frame (0 = off)
     public bool TickClock { get; set; } = true;    // enable default-chain ticking when no render tick source exists
 }
+
+// Setup-time (composition-root) frame-task registration — the seam feature modules use to add native
+// sorted tasks (Rendering's igLoop, Input's dataLoop, …). Shares FrameSlots/FrameContext/TaskResult with
+// IFrameScheduler; each spec is bracketed to the host lifetime by an internal FrameTaskHost (02).
+public static class FrameTaskRegistration {
+    public static IServiceCollection AddFrameTask(this IServiceCollection s, string name, int sort, Func<IServiceProvider, Func<bool>> tick);  // fundamental: factory resolved once at start
+    public static IServiceCollection AddFrameTask(this IServiceCollection s, string name, int sort, Func<FrameContext, TaskResult> run);        // overload: fresh FrameContext each epoch
+}
+
+// The low-level primitive both AddFrameTask paths and IFrameScheduler build on. Public but
+// [EditorBrowsable(Advanced)] — reach for it only when neither higher-level API fits.
+[EditorBrowsable(Advanced)] public sealed class PandaFrameTask : IDisposable {
+    public static PandaFrameTask Register(string name, int sort, Func<bool> tick, string chainName = "default", double delay = 0);
+    public int Sort { get; } public string Name { get; } public bool IsAlive { get; }
+}
+[EditorBrowsable(Advanced)] public static class FrameTaskDiagnostics { public static event Action<Exception>? UnhandledException; } // host subscribes to log/escalate a frame task that threw
 ```
-`AddFrameTask`/`FrameContext`/`TaskResult`/`FrameSlots` are the same types the host uses for `AddHostedTask` ([02](02-hosting.md), [01](01-abstractions.md)); scheduler tasks and host tasks therefore share one ordering space and one task manager (see Design notes).
+`AddFrameTask`/`FrameContext`/`TaskResult`/`FrameSlots` are the same types the **setup-time** `FrameTaskRegistration.AddFrameTask` uses — which lives in *this* project too (see [02](02-hosting.md), [01](01-abstractions.md)). The gameplay-facing `IFrameScheduler` and the composition-root `FrameTaskRegistration` therefore share one ordering space and one task manager (see Design notes).
 
 **Design notes.**
 - **Explicit sort, disposable handles.** Unlike `taskMgr` (global, implicit ordering, name-based removal), tasks carry an explicit `sort` and return an `IScheduledTask` you dispose to remove — no global lookup, no name collisions. The `sort` lives on the same scale as the host's `dataLoop`/`igLoop` so gameplay tasks can be placed deterministically before or after render.
@@ -38,7 +54,8 @@ public sealed class ClockOptions {
 - **Pacing (confirmed available).** `ClockObject`'s `M_limited` mode plus `SetFrameRate` are `PUBLISHED`; `SetMaxDt` caps the dt spike on a long frame. Setting `LimitFrameRate` puts the clock in `M_limited` at `MaxFps` (or register a sleep task) so an epoch can't free-run — the fix for the headless/vsync-off spin described in [02](02-hosting.md) and [00](00-overview.md) §5.
 - **`IGameClock` is injected, never global.** Gameplay reads `Dt` from the injected clock — the structural replacement for ambient `globalClock.dt`, and the seam that makes fixed-step/deterministic testing possible.
 - **Fixed-step is an accumulator, not a separate construct.** `AddFixedStep(hz, step)` is a frame task holding a time accumulator: each frame it adds `Dt` and calls `step(fixedDt)` zero or more times to drain whole fixed intervals, so physics/network ticks advance deterministically regardless of frame rate (the standard fixed-timestep pattern). It's the seam [Physics & Collision](11-physics-collision.md) uses for server-authoritative stepping. Nothing host-level — just a task at a chosen sort.
-- **Scheduler tasks are native task-manager tasks.** `IFrameScheduler` materializes `AddFrameTask`/`AddFixedStep` as native `ManagedAsyncTask`s on the `"default"` chain — the *same* mechanism the host's `HostedTaskRunner` uses for `AddHostedTask` ([02](02-hosting.md)). So an app's gameplay tasks and the host's framework tasks live in one ordering space sorted by `FrameSlots`, and a gameplay task can be placed deterministically before/after `dataLoop`/`igLoop`. The difference is only ergonomic: `IFrameScheduler` is the gameplay-facing, `IGameClock`-aware API; `AddHostedTask` is the composition-root registration.
+- **Scheduler tasks are native task-manager tasks.** The internal `FrameScheduler` (surfaced only through `IFrameScheduler`) materializes `AddFrameTask`/`AddTimed`/`AddFixedStep` as `PandaFrameTask`s (native `ManagedAsyncTask`s) on the `"default"` chain — the *same* `PandaFrameTask` primitive the **setup-time** `FrameTaskRegistration.AddFrameTask` and its internal `FrameTaskHost` materialize, both of which also live in this project ([02](02-hosting.md)). So an app's gameplay tasks and the framework's composition-root tasks live in one ordering space sorted by `FrameSlots`, and a gameplay task can be placed deterministically before/after `dataLoop`/`igLoop`. The difference is only ergonomic: `IFrameScheduler` is the gameplay-facing, `IGameClock`-aware runtime API; `FrameTaskRegistration.AddFrameTask` is the DI-time composition-root registration.
+- **Implementations are internal; the primitive is a de-emphasized escape hatch.** `FrameScheduler` and `GameClock` are `internal` — consumers see only `IFrameScheduler`/`IGameClock`. The primitive both registration paths build on, `PandaFrameTask` (register a `Func<bool>` tick as a native sorted `ManagedAsyncTask`; `true` to continue, `false` to remove; dispose to remove deterministically), stays public but is `[EditorBrowsable(Advanced)]`, as is its error channel `FrameTaskDiagnostics.UnhandledException` — a callback that throws is routed there and removed. Reach for `PandaFrameTask` directly only when neither `IFrameScheduler` nor `AddFrameTask` fits.
 
 **Open items.**
 - (none)

@@ -17,11 +17,13 @@ What none of that provides — and what Python's `Actor` exists for — is the *
 public interface IActorLoader {
     PandaTask<IActor> LoadAsync(string model, IReadOnlyDictionary<string,string>? anims = null, ActorOptions? options = null);
     IActor Load(string model, IReadOnlyDictionary<string,string>? anims = null, ActorOptions? options = null);
+    IActor Load(string model, params AnimClip[] anims);              // positional name+file clips
     // Multipart (separate geometry per part, e.g. head/torso/legs models):
     PandaTask<IActor> LoadAsync(IReadOnlyDictionary<string, ActorPart> parts, ActorOptions? options = null);
     // The full matrix — parts x geometry LODs (either dimension may be singular):
     PandaTask<IActor> LoadAsync(ActorDefinition definition, ActorOptions? options = null);
 }
+public readonly record struct AnimClip(string Name, string File);   // a named animation clip (the params overload)
 public readonly record struct ActorPart(string Model, IReadOnlyDictionary<string,string>? Anims = null);
 public readonly record struct LodLevel(string Name, float SwitchIn, float SwitchOut);   // -> LODNode.add_switch(in, out)
 public sealed class ActorDefinition {
@@ -38,21 +40,29 @@ public sealed class ActorOptions {
     public bool LooseHierarchy { get; set; }      // relax auto_bind/bind_anim hierarchy_match_flags
 }
 
+// The default part name is ActorDefaults.DefaultPart == "modelRoot" (shown inline below).
 public interface IActor : IDisposable {
     NodePath Node { get; }                         // parent it, move it — a normal node
     Character Character { get; }                   // the binding node itself (escape hatch)
 
     // ---- Playback: resolves the name, returns the NATIVE handle ----
-    IAnimControl Anim(string anim, string part = "modelRoot");   // .Loop(true) / .Play(10, 24) / .Pose(f) / .PlayRate — AnimInterface
+    IAnimControl Anim(string anim, string part = "modelRoot");   // .Loop(true) / .Play(10, 24) / .Pose(f) / .PlayRate — AnimInterface; throws if unknown
+    bool TryAnim(string anim, out IAnimControl? control, string part = "modelRoot");   // non-throwing lookup
     IReadOnlyCollection<string> Anims { get; }
-
-    // ---- Subparts: joint subsets of a part (half-body animation) ----
-    void MakeSubpart(string name, SubpartDef def, string parent = "modelRoot");   // PartSubset include/exclude globs
 
     // ---- Blending: name resolution over PartBundle ----
     void EnableBlend(string part = "modelRoot");                 // set_anim_blend_flag(true)
     void DisableBlend(string part = "modelRoot");
     void SetBlendWeight(string anim, float weight, string part = "modelRoot");    // set_control_effect(control, weight)
+
+    // ---- Advanced rigging (subparts, joints, LOD, raw part bundles) hangs off Rig, NOT IActor directly ----
+    IActorRig Rig { get; }
+}
+
+// Reached via IActor.Rig — keeps the advanced native surface out of the everyday actor.
+public interface IActorRig {
+    // ---- Subparts: joint subsets of a part (half-body animation) ----
+    void MakeSubpart(string name, SubpartDef def, string parent = "modelRoot");   // PartSubset include/exclude globs
     PartBundle Part(string part = "modelRoot");                  // native bundle: blend_type, frame_blend_flag, …
 
     // ---- Joints ----
@@ -91,8 +101,8 @@ var ralph = await actors.LoadAsync("ralph.bam", new() { ["walk"] = "ralph-walk.b
 ralph.Node.ReparentTo(scene.Root);
 ralph.Anim("walk").Loop(true);                                  // native AnimInterface
 
-// Half-body: wave with the arms while the legs keep walking.
-ralph.MakeSubpart("arms", new(IncludeJoints: ["arm_*", "hand_*"], ExcludeJoints: []));
+// Half-body: wave with the arms while the legs keep walking. (Advanced rigging is on Rig.)
+ralph.Rig.MakeSubpart("arms", new(IncludeJoints: ["arm_*", "hand_*"], ExcludeJoints: []));
 ralph.Anim("wave", part: "arms").Play();
 
 // In a cutscene (08): the walk holds its slot, poses from t — scrub/reverse-correct.
@@ -104,12 +114,12 @@ var scene1 = new Sequence(
 ```
 
 **Design notes.**
-- **Why `IActor` passes the wrap-rule bar.** It composes several natives (Loader + `Character` + per-part `AnimControlCollection` + `PartSubset` configuration) and holds real state (the name→part→control map, subpart definitions applied to every later bind). What it deliberately does **not** do is re-expose playback or blending semantics: `Anim(...)` returns `IAnimControl` (the `AnimInterface` surface, used directly), and `Part(...)` returns the native `PartBundle`. The old `IAnimationController` re-wrap is deleted.
-- **Binding is lazy and async-friendly.** Anim files bind on first use (Python `Actor`'s lazy-bind), via `load_bind_anim(..., allow_async: true)`; `AnimControl.is_pending`/`wait_pending`/`set_pending_done_event` cover the in-flight window. `LoadAsync` awaits the model via the loader's `AsyncFuture` (directly awaitable in the fork) and returns a usable actor; a first `Play` on a still-binding control simply starts when ready.
+- **Why `IActor` passes the wrap-rule bar.** It composes several natives (Loader + `Character` + per-part `AnimControlCollection` + `PartSubset` configuration) and holds real state (the name→part→control map, subpart definitions applied to every later bind). What it deliberately does **not** do is re-expose playback or blending semantics: `Anim(...)` returns `IAnimControl` (the `AnimInterface` surface, used directly, or `TryAnim` for a non-throwing lookup), and the raw native surface — `Rig.Part(...)` (the `PartBundle`), subparts, joints, LOD — hangs off `IActor.Rig` (an `IActorRig`) rather than crowding the everyday actor. The old `IAnimationController` re-wrap is deleted.
+- **Binding is eager and synchronous (v1).** Named anim files bind at load time, not lazily: `PartBundle.load_bind_anim(loader, file, flags, subset, allow_async: false)` then `AnimControl.wait_pending()` and a `has_anim()` check, so a missing/mismatched clip fails fast during `Load`. The model itself loads through `Loader.LoadSync`, and `LoadAsync` currently wraps that synchronous load in a completed `PandaTask<IActor>`. The lazy/async path (`allow_async: true`, `AnimControl.is_pending`/`wait_pending`/`set_pending_done_event`, the loader's awaitable `AsyncFuture`) is published in the bindings but not yet used here.
 - **`ActorInterval` is pose-per-step** (verified against Python's `privStep`): `frame = startFrame ± t·frameRate` (modulo the range when `constrainedLoop`), then `control.Pose(frame)` — the animation is *driven by the timeline's clock*, not free-running. That is what makes pause/scrub/reverse of a cutscene move the character correctly. `loop` wraps the whole animation; `constrainedLoop` wraps within `startFrame..endFrame`; if `duration` exceeds the range without looping, the final frame holds.
 - **Cross-fades are native.** `CrossFade` builds a `CLerpAnimEffectInterval` (`add_control(control, name, beginEffect, endEffect)`), lerping the *from* anim's weight 1→0 and the *to* anim's 0→1 over the window at C++ speed — enable blending on the part first. Weights land exactly where `SetBlendWeight` would put them, so timeline blends and manual blends compose.
-- **Geometry LOD rides one merged skeleton.** A LOD actor parents each level's parts under a `LODNode` (`add_switch(in, out)` per level), and — following Python's default `merge-lod-bundles` — merges every level's `PartBundle` into one common handle via `Character.merge_bundles`. Consequence: **animations bind once and drive all LOD levels in sync**; `Anim`/`SetBlendWeight`/joints are LOD-agnostic. Switching is the native `LODNode` surface used directly (`ForceSwitch` for debugging a level, `SetLodScale`, `SetCenter`); v1 is merged-only (the non-merged per-LOD-bundle mode adds bookkeeping for no known need).
-- **No animation events — honestly.** The engine raises no per-frame or anim-done events, and `direct` never had them either. Frame-triggered gameplay ("spawn the hit at frame 12") is a `Sequence(new ActorInterval(a, "swing", endFrame: 12), new Call(Hit), new ActorInterval(a, "swing", startFrame: 12))` or a gameplay task polling `Anim("swing").Frame`. Nothing observable is fabricated here.
+- **Geometry LOD rides one merged skeleton.** A LOD actor parents each level's parts under a `LODNode` (`add_switch(in, out)` per level), and — following Python's default `merge-lod-bundles` — merges every level's `PartBundle` into one common handle via `Character.merge_bundles`. Consequence: **animations bind once and drive all LOD levels in sync**; `Anim`/`SetBlendWeight`/joints are LOD-agnostic. Switching is the native `LODNode` surface (via `Rig.LodNode`) used directly (`ForceSwitch` for debugging a level, `SetLodScale`, `SetCenter`); v1 is merged-only (the non-merged per-LOD-bundle mode adds bookkeeping for no known need).
+- **No animation events — honestly.** The engine raises no per-frame or anim-done events, and `direct` never had them either. Frame-triggered gameplay ("spawn the hit at frame 12") is a `Sequence(new ActorInterval(a, "swing", endFrame: 12), new Call(Hit), new ActorInterval(a, "swing", startFrame: 12))` or a gameplay task polling `Anim("swing").GetFrame()`. Nothing observable is fabricated here.
 - **Cleanup is ordinary.** `Character` is a plain refcounted node — no Python-`Actor.cleanup()` trap to replicate. `IActor.Dispose` releases controlled joints and detaches; dropping the node is otherwise enough.
 
 **Non-features (v1).** Non-merged LOD bundles (per-level independent binds — Python's `merge-lod-bundles false` mode) deferred; merged is the default and the sane semantics. Morph/blend-shape slider helpers (`controlJoint` on sliders) deferred. Egg-syntax anim baking/tooling out of scope ([00](00-overview.md) §8).

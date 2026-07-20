@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so the commit count is accurate
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # The linux-x64 native runtime links against system GL/X libraries; the offscreen
+      # tests need them present. Adjust the list if a test reports a missing .so.
+      - name: Install native runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libx11-6 libxrandr2 libxcursor1 libxi6
+
+      # Preview version = <VersionPrefix>-preview.<commit count>, panda3d-style.
+      - name: Compute version suffix
+        id: version
+        run: echo "suffix=preview.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore Panda3D.Framework.sln
+
+      - name: Build
+        run: dotnet build Panda3D.Framework.sln -c Release --no-restore -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      - name: Test
+        run: dotnet test Panda3D.Framework.sln -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack Panda3D.Framework.sln -c Release --no-build -o artifacts -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.nupkg

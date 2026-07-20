@@ -7,8 +7,9 @@
       * Panda3D.Interop  — the generated C# bindings (namespace Panda3D.Core),
         pulled as a NuGet package pinned to the 1.11 preview line. Async's own
         transitive reference unifies with this to a single assembly identity.
-      * Panda3D.Async    — the coroutine/PandaTask layer, project-referenced
-        from the sibling repo so the two evolve together (both "in scope").
+      * Panda3D.Async    — the coroutine/PandaTask layer, consumed as a published
+        NuGet package floating to the greatest 1.11 preview. To co-develop against
+        a local checkout instead, set PandaAsyncProject to its .csproj path.
 
     Individual projects opt out by setting <PandaBindings>false</PandaBindings>.
   -->
@@ -26,13 +27,15 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
 
-    <!-- Version line tracks the engine/bindings. -->
-    <Version>0.1.0</Version>
+    <!-- Base version. CI appends the preview suffix from the commit count
+         (VersionSuffix=preview.N, N = git commit count); a bare local build is just the prefix. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
     <Authors>Panda3D.Framework</Authors>
 
     <!-- Binding coordinates, overridable from the command line. -->
     <PandaInteropVersion Condition="'$(PandaInteropVersion)' == ''">1.11.0-preview.*</PandaInteropVersion>
     <PandaRuntimeVersion Condition="'$(PandaRuntimeVersion)' == ''">1.11.0-preview.*</PandaRuntimeVersion>
+    <PandaAsyncVersion Condition="'$(PandaAsyncVersion)' == ''">1.11.0-preview.*</PandaAsyncVersion>
     <!-- The build-time resource pipeline (docs/04-resources.md), used by the samples. -->
     <PandaFrameworkBuildVersion Condition="'$(PandaFrameworkBuildVersion)' == ''">0.1.0</PandaFrameworkBuildVersion>
 
@@ -45,15 +48,17 @@
          no compile guards here and no AOT link error. Override on the command line if you
          specifically want to compile the Framework itself against the lean surface. -->
     <Panda3DInteropConfiguration Condition="'$(Panda3DInteropConfiguration)' == ''">Debug</Panda3DInteropConfiguration>
-    <PandaAsyncProject Condition="'$(PandaAsyncProject)' == ''">$(MSBuildThisFileDirectory)../Panda3D.Async/src/Panda3D.Async/Panda3D.Async.csproj</PandaAsyncProject>
 
     <PandaBindings Condition="'$(PandaBindings)' == ''">true</PandaBindings>
   </PropertyGroup>
 
-  <!-- Bindings + coroutine layer, added to every project unless opted out. -->
+  <!-- Bindings + coroutine layer, added to every project unless opted out. Async is the
+       published package by default; set PandaAsyncProject to a .csproj path to co-develop
+       against a local checkout instead. -->
   <ItemGroup Condition="'$(PandaBindings)' == 'true'">
     <PackageReference Include="Panda3D.Interop" Version="$(PandaInteropVersion)" />
-    <ProjectReference Include="$(PandaAsyncProject)" />
+    <PackageReference Include="Panda3D.Async" Version="$(PandaAsyncVersion)" Condition="'$(PandaAsyncProject)' == ''" />
+    <ProjectReference Include="$(PandaAsyncProject)" Condition="'$(PandaAsyncProject)' != ''" />
   </ItemGroup>
 
 </Project>

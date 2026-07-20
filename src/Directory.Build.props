@@ -14,4 +14,25 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- NuGet package metadata, shared by every src library. Per-project: PackageId (defaults to the
+       assembly name), Description, and a README.md used as the package readme. -->
+  <PropertyGroup>
+    <Copyright>Copyright (c) 2026, the Panda3D.Framework authors</Copyright>
+    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Maxwell175/Panda3D.Framework</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Maxwell175/Panda3D.Framework</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>panda3d;gamedev;game-engine;3d;graphics</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageReadmeFile Condition="Exists('$(MSBuildProjectDirectory)/README.md')">README.md</PackageReadmeFile>
+    <!-- The framework rides the preview bindings line, so a package depends on a prerelease. -->
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
 </Project>

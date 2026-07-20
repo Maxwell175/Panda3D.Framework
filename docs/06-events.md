@@ -27,7 +27,11 @@ public interface INamedEventBus {
     IDisposable Subscribe(string name, Action<NamedEvent> handler);  // convenience over Observe(...).Subscribe(...)
     void Send(string name, params object[] parameters);      // throw_event(name, …) — rare; mostly Panda raises these
 }
-public readonly record struct NamedEvent(string Name, IReadOnlyList<object> Parameters);  // a drained Event, parsed (not System.EventArgs)
+public readonly record struct NamedEvent(string Name, IReadOnlyList<object> Parameters) {  // a drained Event, parsed (not System.EventArgs)
+    public int Count { get; }                                // Parameters.Count
+    public T Get<T>(int index);                              // typed access; throws InvalidCastException if the param isn't T
+    public bool TryGet<T>(int index, out T value);           // typed access; false if the index is absent or the wrong type
+}
 
 public static class EventsServiceCollectionExtensions {
     public static IServiceCollection AddEvents(this IServiceCollection s);   // registers the pump task + INamedEventBus

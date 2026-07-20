@@ -4,8 +4,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Panda3D.Framework.Abstractions", "src\Panda3D.Framework.Abstractions\Panda3D.Framework.Abstractions.csproj", "{0B6E1B4B-333E-4058-BB71-25641963D6A0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Panda3D.Async", "..\Panda3D.Async\src\Panda3D.Async\Panda3D.Async.csproj", "{2C2381DF-1BAE-4222-94F0-1AC112FBB608}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Panda3D.Framework.Events", "src\Panda3D.Framework.Events\Panda3D.Framework.Events.csproj", "{8C5DDB05-3F33-4CE3-965D-FD8327A19B14}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Panda3D.Framework.Scheduling", "src\Panda3D.Framework.Scheduling\Panda3D.Framework.Scheduling.csproj", "{3662F775-C22C-42DE-ABD3-1E7D5B4F679D}"
@@ -82,18 +80,6 @@ Global
 		{0B6E1B4B-333E-4058-BB71-25641963D6A0}.Release|x64.Build.0 = Release|Any CPU
 		{0B6E1B4B-333E-4058-BB71-25641963D6A0}.Release|x86.ActiveCfg = Release|Any CPU
 		{0B6E1B4B-333E-4058-BB71-25641963D6A0}.Release|x86.Build.0 = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|x64.Build.0 = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Debug|x86.Build.0 = Debug|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|x64.ActiveCfg = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|x64.Build.0 = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|x86.ActiveCfg = Release|Any CPU
-		{2C2381DF-1BAE-4222-94F0-1AC112FBB608}.Release|x86.Build.0 = Release|Any CPU
 		{8C5DDB05-3F33-4CE3-965D-FD8327A19B14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{8C5DDB05-3F33-4CE3-965D-FD8327A19B14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C5DDB05-3F33-4CE3-965D-FD8327A19B14}.Debug|x64.ActiveCfg = Debug|Any CPU

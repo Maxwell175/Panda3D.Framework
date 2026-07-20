@@ -1,0 +1,44 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Full version override (optional; default is <prefix>-preview.<commit count>)'
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Default: <VersionPrefix>-preview.<commit count>. A manual dispatch may override with a full version.
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "arg=-p:Version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "arg=-p:VersionSuffix=preview.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        run: dotnet pack Panda3D.Framework.sln -c Release ${{ steps.v.outputs.arg }} -o artifacts
+
+      - name: Push to NuGet
+        run: |
+          dotnet nuget push "artifacts/Panda3D.Framework*.nupkg" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

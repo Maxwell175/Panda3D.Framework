@@ -8,15 +8,17 @@
 
 **Public surface.**
 ```csharp
-public interface IGui {                                        // per-view: resolve from view.Services (root = main view)
+public interface IGui : IDisposable {                          // per-view: resolve from view.Services (root = main view)
     IView View { get; }                                        // the view this gui belongs to
     T Add<T>(T widget, NodePath? parent = null) where T : Widget;    // materialize + wire; default parent = View.Overlay2d
+    Label Add(Label label, NodePath? parent = null);           // text-only label overload (not a Widget)
     // parent to View.Pixel2d for pixel-exact layout, or to one of the view's edge-anchor nodes (03)
 }
 
 public abstract class Widget : IDisposable {
     public NodePath Node { get; }                              // the PGItem's node: position/scale/parent like any node
     public PGItem Item { get; }                                // NATIVE surface: frame, states, frame_style, focus, set_sound
+    public ButtonHandle PrimaryButton { get; }                 // mouse1 — the button Pressed/Released observe
     public bool Visible { get; set; }
     public bool Enabled { get; set; }                          // set_active: false = the inactive state (greyed, no input)
     // The COMPLETE PGItem event set, typed (no string event ever reaches a consumer):
@@ -24,7 +26,7 @@ public abstract class Widget : IDisposable {
     public IObservable<Unit> Exited { get; }                   // exit
     public IObservable<Unit> Within { get; }                   // within/without: like enter/exit but ignoring occlusion
     public IObservable<Unit> Without { get; }
-    public IObservable<Unit> Pressed { get; }                  // press/release, merged across registered buttons
+    public IObservable<Unit> Pressed { get; }                  // press/release of the PrimaryButton (mouse1)
     public IObservable<Unit> Released { get; }
     public IObservable<bool> FocusChanged { get; }             // focus_in/focus_out (PGItem.set_focus is the setter)
     public void SetRolloverSound(AudioSound sound);            // Item.set_sound(enter event) — typed, no string
@@ -34,14 +36,18 @@ public abstract class Widget<TItem> : Widget where TItem : PGItem {
 }
 
 public sealed class Button : Widget<PGButton> {
-    public Button(string label, float bevel = 0.1f);                                    // PGButton.setup(label, bevel)
-    public Button(NodePath ready, NodePath depressed, NodePath rollover, NodePath inactive);      // custom 4-state
+    public Button(string label, string name = "button", float? bevel = null);           // framework-drawn text button
+    public Button(string label, float bevel);                                           // text button, bevel-only overload
+    public Button(NodePath ready, string name = "button");                                                   // custom 1-state
+    public Button(NodePath ready, NodePath depressed, string name = "button");                               // custom 2-state
+    public Button(NodePath ready, NodePath depressed, NodePath rollover, string name = "button");            // custom 3-state
+    public Button(NodePath ready, NodePath depressed, NodePath rollover, NodePath inactive, string name = "button"); // custom 4-state
     public IObservable<Unit> Clicked { get; }                  // merged click events for all registered click buttons
-    public void AddClickButton(ButtonHandle b);                // default: mouse one; wires the typed stream for that click event
+    public bool AddClickButton(ButtonHandle b);                // default: mouse one; wires the typed stream (true if newly added)
     public void SetClickSound(AudioSound sound);               // Item.set_sound(click event) — typed, no string
 }
 public sealed class Entry : Widget<PGEntry> {
-    public Entry(float width, int lines = 1);                  // PGEntry.setup
+    public Entry(float width = 10f, int numLines = 1, string name = "entry", bool minimal = false);  // setup / setup_minimal
     public string Text { get; set; }                           // get_plain_text / set_text
     public int CursorPosition { get; set; }                    // cursor_position property (character index)
     public LPoint2f CursorScreenPos { get; }                   // get_cursor_X/Y — place IME candidates / tooltips at the caret
@@ -50,6 +56,7 @@ public sealed class Entry : Widget<PGEntry> {
     public bool AcceptEnabled { get; set; }                    // whether Enter fires Submitted (set_accept_enabled)
     public bool CursorKeysActive { get; set; }                 // arrow/home/end handling
     public float BlinkRate { get; set; }
+    public bool IsFocused { get; set; }                        // PGItem.focus (get/set)
     public void Focus();                                       // Item.set_focus(true)
     public IObservable<string> Submitted { get; }              // accept event (payload: current text)
     public IObservable<string> SubmitFailed { get; }           // accept_failed event
@@ -57,38 +64,47 @@ public sealed class Entry : Widget<PGEntry> {
     public IObservable<Unit> Overflowed { get; }               // overflow event (input beyond max_chars)
     public IObservable<int> CursorMoved { get; }               // cursormove event: current cursor position
 }
-public sealed class Slider : Widget<PGSliderBar> {
-    public Slider(bool vertical, float length, float width, float bevel = 0.05f);      // PGSliderBar.setup_slider
-    public float Min { get; set; }  public float Max { get; set; }  public float Value { get; set; }   // set_range / value
+public abstract class SliderBarBase : Widget<PGSliderBar> {    // shared base of Slider and ScrollBar
+    public (float Min, float Max) Range { get; set; }          // set_range / get_min_value / get_max_value
+    public float Min { get; set; }  public float Max { get; set; }  public float Value { get; set; }
     public float Ratio { get; set; }                           // normalized 0..1 (ratio property)
     public bool IsDragging { get; }                            // is_button_down: thumb currently held
     public IObservable<float> ValueChanged { get; }            // adjust event
 }
-public sealed class ScrollBar : Widget<PGSliderBar> {          // PGSliderBar.setup_scroll_bar
-    public ScrollBar(bool vertical, float length, float width, float bevel = 0.05f);
-    public float PageSize { get; set; }  public float ScrollSize { get; set; }  public float Value { get; set; }
-    public float Ratio { get; set; }  public bool IsDragging { get; }
+public sealed class Slider : SliderBarBase {                   // PGSliderBar.setup_slider
+    public Slider(bool vertical, float length, float width, float bevel = 0.05f, string name = "slider");
+    public Slider(float min = 0f, float max = 1f, float value = 0f, GuiOrientation orientation = GuiOrientation.Horizontal,
+                  string name = "slider", float length = 1f, float width = 0.08f, float bevel = 0.02f);
+}
+public sealed class ScrollBar : SliderBarBase {                // PGSliderBar.setup_scroll_bar
+    public ScrollBar(bool vertical, float length, float width, float bevel = 0.05f, string name = "scrollbar");
+    public ScrollBar(GuiOrientation orientation = GuiOrientation.Vertical, string name = "scrollbar",
+                     float length = 1f, float width = 0.08f, float bevel = 0.02f);
+    public float PageSize { get; set; }  public float ScrollSize { get; set; }
     public bool ResizeThumb { get; set; }                      // thumb length tracks page/range
-    public IObservable<float> ValueChanged { get; }
     // custom pieces (thumb/left/right PGButtons) and arbitrary axis: via Item (set_thumb_button, set_axis, …)
 }
 public sealed class ScrollFrame : Widget<PGScrollFrame> {      // PGScrollFrame (manages its own PGSliderBars)
-    public ScrollFrame(float width, float height, float sliderWidth = 0.08f, float bevel = 0.05f);  // setup(...)
+    public ScrollFrame(float width, float height, string name = "scrollframe",
+                       float sliderWidth = 0.08f, float bevel = 0.05f);                   // canvas frame = (0,width,-height,0)
+    public ScrollFrame(float width, float height, float left, float right, float bottom, float top,
+                       string name = "scrollframe", float sliderWidth = 0.08f, float bevel = 0.02f);  // explicit canvas frame
     public NodePath Canvas { get; }                            // get_canvas_node: parent scrolled content here
     public LVecBase4f VirtualFrame { get; set; }               // the scrollable extent (virtual_frame)
     public bool AutoHide { get; set; }                         // hide sliders when content fits
-    public IPGSliderBar? HorizontalSlider { get; }             // the managed piece sliders (native)
-    public IPGSliderBar? VerticalSlider { get; }
+    public bool ManagePieces { get; set; }                     // native piece management (manage_pieces)
+    public IPGSliderBar HorizontalSlider { get; }              // the managed piece sliders (native)
+    public IPGSliderBar VerticalSlider { get; }
     public IObservable<LVecBase2f> Scrolled { get; }           // (hRatio, vRatio) from the piece sliders' adjust events
 }
 public sealed class ProgressBar : Widget<PGWaitBar> {          // PGWaitBar
-    public ProgressBar(float width, float height, float range = 100f);
+    public ProgressBar(float width, float height, float range = 100f, string name = "progress");
     public float Value { get; set; }  public float Range { get; set; }
     public float Percent { get; }                              // get_percent
 }
 // Non-interactive text is NOT a PGItem: a Label is a thin TextNode holder (the OnscreenText analog).
 public sealed class Label : IDisposable {
-    public Label(string text);
+    public Label(string text, string name = "label");
     public NodePath Node { get; }  public TextNode TextNode { get; }     // native: align, color, scale, wordwrap
     public string Text { get; set; }
 }

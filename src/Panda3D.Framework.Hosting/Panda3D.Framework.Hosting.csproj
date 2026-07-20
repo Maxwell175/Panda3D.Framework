@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Panda3D.Framework.Hosting</RootNamespace>
     <PackageId>Panda3D.Framework.Hosting</PackageId>
-    <Description>The application lifecycle and the Poll-only frame loop: GameApplication (builder -> Build -> Run), AddHostedTask/AddBootstrap/AddSceneManager.</Description>
+    <Description>The application lifecycle and the Poll-only frame loop: GameApplication (builder -> Build -> Run), IBootstrap, AddBootstrap/AddSceneManager.</Description>
   </PropertyGroup>
 
   <ItemGroup>

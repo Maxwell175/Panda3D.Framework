@@ -1,6 +1,6 @@
 # 12 — Audio & Misc (`Panda3D.Framework.Audio`)
 
-**Purpose.** Audio, on the engine's own types: sounds and managers are the **native** `AudioSound`/`AudioManager` binding classes used directly — the same objects [08](08-intervals.md)'s `SoundInterval` seeks and [10](10-gui.md)'s widget sounds consume. The framework adds only what Panda leaves to Python: **lifecycle** (create the SFX/music managers, run the per-frame `update()` at the audio slot), the **3-D positional layer** (`Audio3DManager` is Python-only — an attach registry pushing node positions into the published 3-D primitives each frame), and **awaitable completion** (`set_finished_event` through the pump, mirroring interval done-events). This doc also records the deliberate omissions: no blackboard, no FSM (deferred, below).
+**Purpose.** Audio, on the engine's own types: sounds and managers are the **native** `AudioSound`/`AudioManager` binding classes used directly — the same objects [08](08-intervals.md)'s `SoundInterval` seeks and [10](10-gui.md)'s widget sounds consume. The framework adds only what Panda leaves to Python: **lifecycle** (create the SFX/music managers, run the per-frame `update()` at the audio slot), the **3-D positional layer** (`Audio3DManager` is Python-only — an attach registry pushing node positions into the published 3-D primitives each frame), and a thin reusable **`ISound`** handle over each native sound whose **`Finished`** is awaitable (`set_finished_event` through the pump, mirroring interval done-events). This doc also records the deliberate omissions: no blackboard, no FSM (deferred, below).
 
 **Replaces in `direct`.** ShowBase's audio setup (`createBaseAudioManagers`, `sfxManagerList`/`musicManager`, `loadSfx`/`loadMusic`, `playSfx`/`playMusic`, the audio update task) and `direct.showbase.Audio3DManager`. The `bboard`/BulletinBoard global is **not** replaced — it's cut (see Non-features).
 
@@ -8,12 +8,22 @@
 
 **Public surface.**
 ```csharp
-public interface IAudio {
+public interface IAudio : IDisposable {                 // dispose shuts both managers down
     AudioManager Sfx { get; }                           // NATIVE managers, used directly:
     AudioManager Music { get; }                         //   get_sound / set_volume / set_active / concurrent limit
-    AudioSound LoadSfx(string path, bool positional = false);    // Sfx.GetSound sugar (positional: true for 3-D use)
-    AudioSound LoadMusic(string path);
-    PandaTask WhenFinished(AudioSound sound);           // set_finished_event -> pump -> completion (mirrors 08's WhenDone)
+    ISound LoadSfx(string path, bool positional = false);    // load once -> reusable handle (positional: true for 3-D use)
+    ISound LoadMusic(string path);
+    ISound Wrap(AudioSound sound);                      // lift a native sound (GUI/manager/null sound) into the ISound surface
+}
+
+public interface ISound {                               // thin managed handle over one native AudioSound
+    void Play();                                        // (re)start from the beginning
+    void Stop();
+    bool IsPlaying { get; }
+    float Volume { get; set; }                          // [0, 1]
+    bool Loop { get; set; }
+    IObservable<Unit> Finished { get; }                 // fires once on completion then completes; await sound.Finished
+    AudioSound Native { get; }                          // escape hatch: rate, balance, seek, finished-event names
 }
 
 public interface IAudio3D : IDisposable {               // the Audio3DManager equivalent — one per (manager, listener)
@@ -34,26 +44,26 @@ public static class AudioServiceCollectionExtensions {
 **Usage.**
 ```csharp
 var click = audio.LoadSfx("click.ogg");
-click.Play();                                            // native AudioSound: Play/Stop/SetLoop/SetVolume/SetPlayRate/SetTime
+click.Play();                                            // ISound: Play/Stop, Volume, Loop; Native for rate/balance/seek
 
 var theme = audio.LoadMusic("theme.ogg");
-theme.SetLoop(true); theme.Play();
+theme.Loop = true; theme.Play();
 audio.Music.SetVolume(0.6f);                             // volume group = the native manager's volume
 
-// 3-D: footsteps follow the actor; the camera listens.
+// 3-D: footsteps follow the actor; the camera listens. Attach the native sound (ISound.Native).
 var steps = audio.LoadSfx("steps.ogg", positional: true);
 audio3d.AttachListener(view.Camera.Node);
-audio3d.Attach(steps, ralph.Node);
-audio3d.SetVelocityAuto(steps);
+audio3d.Attach(steps.Native, ralph.Node);
+audio3d.SetVelocityAuto(steps.Native);
 
-await audio.WhenFinished(stinger);                       // coroutine-friendly, like intervals' WhenDone
+await stinger.Finished;                                  // ISound.Finished — coroutine-friendly, like intervals' WhenDone
 ```
 
 **Design notes.**
-- **No framework sound or manager types.** The old draft's `IAudioService`/`ISound` re-wrapped the natives — killed by the wrap rule. `AudioSound` already publishes the full working surface (`play`/`stop`, `set_loop`/`loop_count`/`loop_start`, **`set_time`** — the seek [08](08-intervals.md)'s `SoundInterval` re-syncs with — `set_volume`/`set_balance`/`set_play_rate`, `set_active`, `length`, `status`, `set_finished_event`), and `AudioManager` publishes `get_sound(file, positional, mode)`, `set_volume`, `set_active`, `set_concurrent_sound_limit`. `IAudio` is *lifecycle + sugar*, nothing more.
+- **Managers stay native; sounds get a thin handle.** `AudioManager` is used directly — no wrapper — because it already publishes its whole working surface (`get_sound(file, positional, mode)`, `set_volume`, `set_active`, `set_concurrent_sound_limit`, `update`). `AudioSound` likewise publishes `play`/`stop`, `set_loop`/`loop_count`/`loop_start`, **`set_time`** — the seek [08](08-intervals.md)'s `SoundInterval` re-syncs with — `set_volume`/`set_balance`/`set_play_rate`, `set_active`, `length`, `status`, `set_finished_event`, and stays reachable as `ISound.Native`. `ISound` is not a re-wrap of that surface: it is a deliberately thin managed handle adding only what a raw `AudioSound` can't express in C# idiom — a reusable `Play`/`Stop`/`Volume`/`Loop` surface and, above all, the **awaitable `Finished`** (`IObservable<Unit>`). `LoadSfx`/`LoadMusic` hand one back; `Wrap` lifts any native sound (a GUI sound, a manager sound) into it. `IAudio` itself is *lifecycle + loading*, and `IDisposable` — disposing it shuts both managers down.
 - **The update task is the `audioLoop`.** `AddAudio` creates the two managers via `AudioManager.CreateAudioManager()` and registers one frame task at `FrameSlots.Audio` (60) calling `update()` on each — ShowBase's audio loop, made explicit. Extra volume groups (ambient, voice): create another native manager and register its `update()` as your own task; nothing framework-specific about it.
 - **`IAudio3D` passes the wrap-rule bar** the same way `IActor` and `ParticleEffect` did: the C++ side publishes only primitives (`AudioSound.set_3d_attributes(px..vz)`, `AudioManager.audio_3d_set_listener_attributes(...)`, `audio_3d_set_distance_factor`), and the attach-registry-plus-per-frame-push layer is Python-only (`Audio3DManager`: `attachSoundToObject`/`attachListener`/`setSoundVelocity(Auto)`/`update`). Ours holds the sound→emitter map, pushes net positions (and derived or explicit velocities) each frame from the audio task, and detaches everything on dispose. Load positional sounds with `positional: true`, per the manager's `get_sound` contract.
-- **Finished is awaitable, exactly like intervals.** `WhenFinished` assigns a unique `set_finished_event("snd-done-{id}")`; the engine queues it on completion; the [Events](06-events.md) pump routes it; the `PandaTask` completes. A stinger-then-resume-music sequence is two awaits — or use [08](08-intervals.md)'s `SoundInterval` when it should hold a *timeline* slot instead.
+- **Finished is awaitable, exactly like intervals.** `ISound.Finished` is an `IObservable<Unit>` built lazily on first access: internally the handle assigns a unique `set_finished_event("snd-done-{id}")`, the engine queues it on completion, the [Events](06-events.md) pump routes it, and the handle relays it onto a replaying `AsyncSubject` — so `await sound.Finished` completes once playback ends (an already-stopped sound completes immediately; a looping one never does). A stinger-then-resume-music sequence is two awaits — or use [08](08-intervals.md)'s `SoundInterval` when it should hold a *timeline* slot instead.
 - **Logging.** `DirectNotify` is not reimplemented; `ILogger<T>` throughout, as everywhere else.
 
 **Non-features (v1).** **No blackboard** — `direct`'s `bboard` was a global string→object dictionary, and a framework `IBlackboard` would be the same opinion with DI paint: plain injected services (or the game's own store) are clearer, typed, and scoped for free — the same reasoning that cut `IWorld` and the typed event bus. No DSP/filter surface (`FilterProperties` is native if a backend supports it). No framework mixer/bus graph — the native per-manager volume *is* the group model.
