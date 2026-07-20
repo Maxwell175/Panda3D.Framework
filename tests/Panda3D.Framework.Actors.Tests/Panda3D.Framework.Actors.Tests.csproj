@@ -27,4 +27,13 @@
     <Compile Include="../VisualTestSupport/VisualTestHelpers.cs" Link="VisualTestHelpers.cs" />
   </ItemGroup>
 
+  <!-- Roaming Ralph model + animations, copied next to the test binary so the actor tests
+       load them by a repo-relative path — no dependency on any local checkout. -->
+  <ItemGroup>
+    <Content Include="../../samples/models/ralph.egg.pz;../../samples/models/ralph-walk.egg.pz;../../samples/models/ralph-run.egg.pz;../../samples/models/ralph.jpg">
+      <Link>models/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

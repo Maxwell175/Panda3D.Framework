@@ -19,7 +19,7 @@ namespace Panda3D.Framework.Actors.Tests;
 
 public sealed class ActorTests
 {
-    static readonly string RalphDir = "/home/maxwell/CLionProjects/panda3d/samples/roaming-ralph/models";
+    static readonly string RalphDir = Path.Combine(AppContext.BaseDirectory, "models");
     static readonly string RalphModel = Path.Combine(RalphDir, "ralph.egg.pz");
     static readonly string RalphWalk = Path.Combine(RalphDir, "ralph-walk.egg.pz");
     static readonly string RalphRun = Path.Combine(RalphDir, "ralph-run.egg.pz");
