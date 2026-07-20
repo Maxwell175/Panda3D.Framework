@@ -30,16 +30,16 @@ jobs:
         run: echo "suffix=preview.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Restore
-        run: dotnet restore Panda3D.Framework.sln
+        run: dotnet restore Panda3D.Framework.CI.slnf
 
       - name: Build
-        run: dotnet build Panda3D.Framework.sln -c Release --no-restore -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+        run: dotnet build Panda3D.Framework.CI.slnf -c Release --no-restore -p:VersionSuffix=${{ steps.version.outputs.suffix }}
 
       - name: Test
-        run: dotnet test Panda3D.Framework.sln -c Release --no-build
+        run: dotnet test Panda3D.Framework.CI.slnf -c Release --no-build
 
       - name: Pack
-        run: dotnet pack Panda3D.Framework.sln -c Release --no-build -o artifacts -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+        run: dotnet pack Panda3D.Framework.CI.slnf -c Release --no-build -o artifacts -p:VersionSuffix=${{ steps.version.outputs.suffix }}
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

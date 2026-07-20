@@ -1,0 +1,30 @@
+{
+  "solution": {
+    "path": "Panda3D.Framework.sln",
+    "projects": [
+      "src\\Panda3D.Framework.Abstractions\\Panda3D.Framework.Abstractions.csproj",
+      "src\\Panda3D.Framework.Actors\\Panda3D.Framework.Actors.csproj",
+      "src\\Panda3D.Framework.Audio\\Panda3D.Framework.Audio.csproj",
+      "src\\Panda3D.Framework.Build\\Panda3D.Framework.Build.csproj",
+      "src\\Panda3D.Framework.Events\\Panda3D.Framework.Events.csproj",
+      "src\\Panda3D.Framework.Gui\\Panda3D.Framework.Gui.csproj",
+      "src\\Panda3D.Framework.Hosting\\Panda3D.Framework.Hosting.csproj",
+      "src\\Panda3D.Framework.Input\\Panda3D.Framework.Input.csproj",
+      "src\\Panda3D.Framework.Intervals\\Panda3D.Framework.Intervals.csproj",
+      "src\\Panda3D.Framework\\Panda3D.Framework.csproj",
+      "src\\Panda3D.Framework.Particles\\Panda3D.Framework.Particles.csproj",
+      "src\\Panda3D.Framework.Physics\\Panda3D.Framework.Physics.csproj",
+      "src\\Panda3D.Framework.Rendering\\Panda3D.Framework.Rendering.csproj",
+      "src\\Panda3D.Framework.Scheduling\\Panda3D.Framework.Scheduling.csproj",
+      "tests\\Panda3D.Framework.Actors.Tests\\Panda3D.Framework.Actors.Tests.csproj",
+      "tests\\Panda3D.Framework.Audio.Tests\\Panda3D.Framework.Audio.Tests.csproj",
+      "tests\\Panda3D.Framework.Core.Tests\\Panda3D.Framework.Core.Tests.csproj",
+      "tests\\Panda3D.Framework.Gui.Tests\\Panda3D.Framework.Gui.Tests.csproj",
+      "tests\\Panda3D.Framework.Input.Tests\\Panda3D.Framework.Input.Tests.csproj",
+      "tests\\Panda3D.Framework.Intervals.Tests\\Panda3D.Framework.Intervals.Tests.csproj",
+      "tests\\Panda3D.Framework.Particles.Tests\\Panda3D.Framework.Particles.Tests.csproj",
+      "tests\\Panda3D.Framework.Physics.Tests\\Panda3D.Framework.Physics.Tests.csproj",
+      "tests\\Panda3D.Framework.Rendering.Tests\\Panda3D.Framework.Rendering.Tests.csproj"
+    ]
+  }
+}

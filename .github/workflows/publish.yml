@@ -34,7 +34,7 @@ jobs:
           fi
 
       - name: Pack
-        run: dotnet pack Panda3D.Framework.sln -c Release ${{ steps.v.outputs.arg }} -o artifacts
+        run: dotnet pack Panda3D.Framework.CI.slnf -c Release ${{ steps.v.outputs.arg }} -o artifacts
 
       - name: Push to NuGet
         run: |
