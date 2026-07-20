@@ -19,10 +19,23 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # The linux-x64 native runtime links against system GL/X libraries; the offscreen
-      # tests need them present. Adjust the list if a test reports a missing .so.
-      - name: Install native runtime dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1 libx11-6 libxrandr2 libxcursor1 libxi6
+      # The offscreen rendering tests create a real GL context and read back screenshots.
+      # libgl1 is only the loader — libgl1-mesa-dri supplies the software rasterizer, and the
+      # tests run under xvfb-run so GLX has a virtual display. Without the driver the graphics
+      # tests hang waiting for a GSG that never initializes.
+      - name: Install native + headless-GL dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libgl1-mesa-dri libglu1-mesa libx11-6 libxrandr2 libxcursor1 libxi6 xvfb
+
+      # The native runtime packages (all four platforms, ~330 MB) make a cold restore slow.
+      # Cache the global packages folder; restore-keys give a warm cache even when a floating
+      # preview bumps, so only the changed package re-downloads.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Build.targets') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
 
       # Preview version = <VersionPrefix>-preview.<commit count>, panda3d-style.
       - name: Compute version suffix
@@ -35,8 +48,19 @@ jobs:
       - name: Build
         run: dotnet build Panda3D.Framework.CI.slnf -c Release --no-restore -p:VersionSuffix=${{ steps.version.outputs.suffix }}
 
+      # xvfb-run gives the offscreen GL a virtual X display. --blame-hang-timeout bounds any
+      # stuck test: after the timeout vstest kills it and names it, so the job fails fast with
+      # a diagnosis instead of hanging until the 6-hour limit.
       - name: Test
-        run: dotnet test Panda3D.Framework.CI.slnf -c Release --no-build
+        run: xvfb-run -a dotnet test Panda3D.Framework.CI.slnf -c Release --no-build --blame-hang-timeout 120s --blame-hang-dump-type none
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/**'
+          if-no-files-found: ignore
 
       - name: Pack
         run: dotnet pack Panda3D.Framework.CI.slnf -c Release --no-build -o artifacts -p:VersionSuffix=${{ steps.version.outputs.suffix }}
